@@ -1,0 +1,23 @@
+services:
+  antispam:
+    build: .
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN:?set it in .env}
+      - CAPTCHA_TIMEOUT_SEC=${CAPTCHA_TIMEOUT_SEC:-60}
+      # Noise look: l = 2px bands, g = 1px bands, dots = sparse dots.
+      - CAPTCHA_STYLE=${CAPTCHA_STYLE:-l}
+      # Motion: 1 = opposing layers, 2 = same direction, wobbling speeds.
+      - CAPTCHA_MOTION=${CAPTCHA_MOTION:-1}
+      # Share of flickering noise per frame (e.g. 0.01); 0 = off.
+      - CAPTCHA_SPRINKLE=${CAPTCHA_SPRINKLE:-0}
+      # Bake in a faint fake expression; answering it kicks instantly.
+      - CAPTCHA_DECOY=${CAPTCHA_DECOY:-false}
+      # Wrong numeric answers allowed before the kick.
+      - CAPTCHA_MAX_ATTEMPTS=${CAPTCHA_MAX_ATTEMPTS:-3}
+      - DATA_FILE=/app/data/state.json
+      # ffmpeg ships in the image; set this to use a host binary instead
+      # (mount it as a volume and point the path here).
+      - FFMPEG_PATH=${FFMPEG_PATH:-ffmpeg}
+    volumes:
+      - ./data:/app/data
