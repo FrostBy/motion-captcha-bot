@@ -1,7 +1,11 @@
+import type { Api } from 'grammy';
+
 import { makeDecoy, makeExpression, renderAnimation, type Motion, type Style } from './captcha.js';
 import { withRetry, quietly } from './telegram.js';
 import type { Messages } from './config.js';
 import type { State } from './state.js';
+
+export type ChatMemberStatus = Awaited<ReturnType<Api['getChatMember']>>['status'];
 
 /** The narrow Bot API slice the logic needs; mocked in tests. */
 export interface ChatApi {
@@ -14,6 +18,7 @@ export interface ChatApi {
   deleteMessage(chatId: number, messageId: number): Promise<unknown>;
   banChatMember(chatId: number, userId: number): Promise<unknown>;
   unbanChatMember(chatId: number, userId: number): Promise<unknown>;
+  getChatMember(chatId: number, userId: number): Promise<{ status: ChatMemberStatus }>;
 }
 
 export interface Member {
@@ -77,9 +82,23 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
   const { api, state } = deps;
 
   if (member.isBot) {
-    // A bot brought in by a member stays; one that walked in alone does not.
-    if (member.addedBy !== member.id) return;
-    deps.log('Bot joined on its own, kicking', { chatId, botId: member.id });
+    let addedByAdmin = false;
+    try {
+      const adder = await withRetry(() => api.getChatMember(chatId, member.addedBy));
+      addedByAdmin = adder.status === 'administrator' || adder.status === 'creator';
+    } catch (error) {
+      deps.log(`Could not verify bot adder: ${errorText(error)}`, {
+        chatId,
+        botId: member.id,
+        addedBy: member.addedBy,
+      });
+    }
+    if (addedByAdmin) return;
+    deps.log('Bot was not added by an admin, kicking', {
+      chatId,
+      botId: member.id,
+      addedBy: member.addedBy,
+    });
     await kick(deps, chatId, member.id);
     return;
   }

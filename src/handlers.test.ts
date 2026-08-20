@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MESSAGES } from './config.js';
-import { onJoin, onMessage, onSeenInside, sweepExpired, type Deps } from './handlers.js';
+import {
+  onJoin,
+  onMessage,
+  onSeenInside,
+  sweepExpired,
+  type ChatMemberStatus,
+  type Deps,
+} from './handlers.js';
 import { State } from './state.js';
 
 vi.mock('./captcha.js', async (importOriginal) => ({
@@ -27,6 +34,9 @@ function setup(now = 1_000_000): { deps: Deps; api: Record<string, ReturnType<ty
     deleteMessage: vi.fn(async () => true),
     banChatMember: vi.fn(async () => true),
     unbanChatMember: vi.fn(async () => true),
+    getChatMember: vi.fn(
+      async (): Promise<{ status: ChatMemberStatus }> => ({ status: 'member' }),
+    ),
   };
   const deps: Deps = {
     api,
@@ -158,20 +168,35 @@ describe('newcomer greeting', () => {
 });
 
 describe('bots', () => {
-  it('a bot added by a member stays', async () => {
+  it('a bot added by an admin stays', async () => {
     const { deps, api } = setup();
+    api.getChatMember!.mockResolvedValueOnce({ status: 'administrator' });
 
     await onJoin(deps, CHAT, { id: 900, isBot: true, firstName: 'Bot', addedBy: 7 });
 
+    expect(api.getChatMember).toHaveBeenCalledWith(CHAT, 7);
     expect(api.banChatMember).not.toHaveBeenCalled();
     expect(api.sendAnimation).not.toHaveBeenCalled();
   });
 
-  it('a bot that joined on its own gets kicked', async () => {
+  it('a bot added by a regular member gets kicked', async () => {
     const { deps, api } = setup();
 
-    await onJoin(deps, CHAT, { id: 901, isBot: true, firstName: 'Bot', addedBy: 901 });
+    await onJoin(deps, CHAT, { id: 901, isBot: true, firstName: 'Bot', addedBy: 8 });
     expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 901);
+  });
+
+  it('a bot gets kicked when its adder cannot be verified', async () => {
+    const { deps, api } = setup();
+    api.getChatMember!.mockRejectedValueOnce(new Error('Telegram unavailable'));
+
+    await onJoin(deps, CHAT, { id: 902, isBot: true, firstName: 'Bot', addedBy: 9 });
+
+    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 902);
+    expect(deps.log).toHaveBeenCalledWith(
+      expect.stringContaining('Could not verify bot adder'),
+      expect.anything(),
+    );
   });
 
   it('ffmpeg failure lets the newcomer through loudly instead of trapping them', async () => {

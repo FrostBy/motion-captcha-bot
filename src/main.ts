@@ -36,6 +36,7 @@ const api: ChatApi = {
   deleteMessage: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
   banChatMember: (chatId, userId) => bot.api.banChatMember(chatId, userId),
   unbanChatMember: (chatId, userId) => bot.api.unbanChatMember(chatId, userId),
+  getChatMember: (chatId, userId) => bot.api.getChatMember(chatId, userId),
 };
 
 const deps: Deps = {
