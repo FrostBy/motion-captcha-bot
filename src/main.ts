@@ -34,8 +34,14 @@ const api: ChatApi = {
     }),
   sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' }),
   deleteMessage: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
-  banChatMember: (chatId, userId) => bot.api.banChatMember(chatId, userId),
-  unbanChatMember: (chatId, userId) => bot.api.unbanChatMember(chatId, userId),
+  banChatMember: (chatId, userId, untilDate) =>
+    bot.api.banChatMember(chatId, userId, untilDate === undefined ? {} : { until_date: untilDate }),
+  unbanChatMember: (chatId, userId, onlyIfBanned) =>
+    bot.api.unbanChatMember(
+      chatId,
+      userId,
+      onlyIfBanned === undefined ? {} : { only_if_banned: onlyIfBanned },
+    ),
   getChatMember: (chatId, userId) => bot.api.getChatMember(chatId, userId),
 };
 
@@ -49,6 +55,7 @@ const deps: Deps = {
   captchaSprinkle: config.captchaSprinkle,
   captchaDecoy: config.captchaDecoy,
   captchaMaxAttempts: config.captchaMaxAttempts,
+  captchaBanSec: config.captchaBanSec,
   allowedBotIds: config.allowedBotIds,
   messages: loadMessages(config.messagesFile),
   log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),

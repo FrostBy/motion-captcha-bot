@@ -13,8 +13,10 @@ services:
       - CAPTCHA_SPRINKLE=${CAPTCHA_SPRINKLE:-0}
       # Bake in a faint fake expression; answering it kicks instantly.
       - CAPTCHA_DECOY=${CAPTCHA_DECOY:-false}
-      # Wrong numeric answers allowed before the kick.
+      # Wrong numeric answers allowed before the temporary ban.
       - CAPTCHA_MAX_ATTEMPTS=${CAPTCHA_MAX_ATTEMPTS:-3}
+      # Seconds a failed newcomer remains banned (60..31536000).
+      - CAPTCHA_BAN_SEC=${CAPTCHA_BAN_SEC:-300}
       # Bots allowed regardless of who added them (comma-separated numeric IDs).
       - ALLOWED_BOT_IDS=${ALLOWED_BOT_IDS:-}
       - DATA_FILE=/app/data/state.json

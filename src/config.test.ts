@@ -4,7 +4,19 @@ import { loadConfig } from './config.js';
 
 describe('loadConfig', () => {
   it('leaves the Telegram API root unset by default', () => {
-    expect(loadConfig({ BOT_TOKEN: '123:test' }).telegramApiRoot).toBeUndefined();
+    const config = loadConfig({ BOT_TOKEN: '123:test' });
+    expect(config.telegramApiRoot).toBeUndefined();
+    expect(config.captchaBanSec).toBe(300);
+  });
+
+  it('accepts a temporary captcha ban duration', () => {
+    expect(loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_BAN_SEC: '600' }).captchaBanSec).toBe(600);
+  });
+
+  it('rejects a ban duration too close to Telegram\'s permanent-ban cutoff', () => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_BAN_SEC: '30' })).toThrow(
+      'CAPTCHA_BAN_SEC must be an integer from 60 to 31536000',
+    );
   });
 
   it('accepts a comma-separated bot allowlist', () => {

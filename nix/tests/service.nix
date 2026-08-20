@@ -158,7 +158,7 @@ pkgs.testers.nixosTest {
         assert len(deletes) == 2, deletes
         assert {int(call["parameters"]["message_id"]) for call in deletes} == {700, captcha["message_id"]}, deletes
 
-    with subtest("kick after the numeric attempt limit"):
+    with subtest("temporarily ban after the numeric attempt limit"):
         restart_bot()
         join(8, "Bob")
         for message_id in (801, 802, 803):
@@ -171,12 +171,11 @@ pkgs.testers.nixosTest {
                 "text": "99",
             })
         bans = wait_for_request("banChatMember", "attempt-limit ban")
-        unbans = wait_for_request("unbanChatMember", "attempt-limit unban")
         assert int(bans[-1]["parameters"]["user_id"]) == 8, bans
-        assert int(unbans[-1]["parameters"]["user_id"]) == 8, unbans
-        assert bans[-1]["seq"] < unbans[-1]["seq"], (bans, unbans)
+        assert int(bans[-1]["parameters"]["until_date"]) > int(time.time()), bans
+        assert api_requests("unbanChatMember") == [], api_requests("unbanChatMember")
 
-    with subtest("kick an answer to the deterministic decoy"):
+    with subtest("temporarily ban an answer to the deterministic decoy"):
         restart_bot()
         join(9, "Carol")
         inject({
@@ -190,7 +189,7 @@ pkgs.testers.nixosTest {
         bans = wait_for_request("banChatMember", "decoy ban")
         assert len(bans) == 1 and int(bans[0]["parameters"]["user_id"]) == 9, bans
 
-    with subtest("kick after the captcha deadline"):
+    with subtest("temporarily ban after the captcha deadline"):
         restart_bot()
         join(10, "Dave")
         bans = wait_for_request("banChatMember", "deadline ban")

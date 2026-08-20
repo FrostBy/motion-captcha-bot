@@ -48,6 +48,7 @@ function setup(now = 1_000_000): { deps: Deps; api: Record<string, ReturnType<ty
     captchaSprinkle: 0,
     captchaDecoy: false,
     captchaMaxAttempts: 3,
+    captchaBanSec: 300,
     allowedBotIds: new Set(),
     messages: DEFAULT_MESSAGES,
     log: vi.fn(),
@@ -112,14 +113,15 @@ describe('newcomer greeting', () => {
     expect(deps.state.isPassed(CHAT, 7)).toBe(false);
   });
 
-  it('answering the decoy kicks instantly', async () => {
+  it('answering the decoy triggers a temporary ban', async () => {
     const { deps, api } = setup();
     deps.captchaDecoy = true;
     await onJoin(deps, CHAT, guest);
 
     await onMessage(deps, CHAT, 7, 557, '8');
 
-    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 7);
+    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 7, 1300);
+    expect(api.unbanChatMember).not.toHaveBeenCalled();
     expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 557);
     expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 100);
     expect(deps.state.getPending(CHAT, 7)).toBeUndefined();
@@ -135,17 +137,28 @@ describe('newcomer greeting', () => {
     expect(api.deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('expiration: kick and captcha cleanup', async () => {
+  it('expiration: temporary ban and captcha cleanup', async () => {
     const { deps, api } = setup();
     await onJoin(deps, CHAT, guest);
 
     deps.now = () => 1_000_000 + 61_000;
     await sweepExpired(deps);
 
-    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 7);
-    expect(api.unbanChatMember).toHaveBeenCalledWith(CHAT, 7);
+    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 7, 1361);
+    expect(api.unbanChatMember).not.toHaveBeenCalled();
     expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 100);
     expect(deps.state.getPending(CHAT, 7)).toBeUndefined();
+  });
+
+  it('explicitly lifts an expired temporary ban', async () => {
+    const { deps, api } = setup();
+    deps.state.markTemporarilyBanned(CHAT, 7, 1_001_000);
+    deps.now = () => 1_001_000;
+
+    await sweepExpired(deps);
+
+    expect(api.unbanChatMember).toHaveBeenCalledWith(CHAT, 7, true);
+    expect(deps.state.hasTemporaryBan(CHAT, 7)).toBe(false);
   });
 
   it('a pending user leaving drops the captcha without a kick', async () => {

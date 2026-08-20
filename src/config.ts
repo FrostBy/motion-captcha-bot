@@ -15,8 +15,10 @@ export interface Config {
   captchaSprinkle: number;
   /** Bake in a faint fake expression; answering it means an instant kick. */
   captchaDecoy: boolean;
-  /** Wrong numeric answers allowed before the kick. */
+  /** Wrong numeric answers allowed before the temporary ban. */
   captchaMaxAttempts: number;
+  /** Seconds a failed newcomer remains banned. */
+  captchaBanSec: number;
   /** Bots allowed regardless of who added them. */
   allowedBotIds: ReadonlySet<number>;
   dataFile: string;
@@ -64,6 +66,27 @@ function parseAllowedBotIds(value: string | undefined): ReadonlySet<number> {
   return ids;
 }
 
+const DEFAULT_CAPTCHA_BAN_SEC = 300;
+// Stay comfortably inside Telegram's 30-second/366-day permanent-ban cutoffs.
+const MIN_TEMPORARY_BAN_SEC = 60;
+const MAX_TEMPORARY_BAN_SEC = 365 * 24 * 60 * 60;
+
+function parseCaptchaBanSec(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_CAPTCHA_BAN_SEC;
+  if (!/^\d+$/.test(value)) {
+    throw new Error('CAPTCHA_BAN_SEC must be an integer from 60 to 31536000');
+  }
+  const seconds = Number(value);
+  if (
+    !Number.isSafeInteger(seconds) ||
+    seconds < MIN_TEMPORARY_BAN_SEC ||
+    seconds > MAX_TEMPORARY_BAN_SEC
+  ) {
+    throw new Error('CAPTCHA_BAN_SEC must be an integer from 60 to 31536000');
+  }
+  return seconds;
+}
+
 /** Missing file means defaults; a broken one is a loud config error. */
 export function loadMessages(file: string): Messages {
   let raw: string;
@@ -107,6 +130,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captchaDecoy: env.CAPTCHA_DECOY === 'true',
     captchaMaxAttempts:
       Number(env.CAPTCHA_MAX_ATTEMPTS) > 0 ? Math.floor(Number(env.CAPTCHA_MAX_ATTEMPTS)) : 3,
+    captchaBanSec: parseCaptchaBanSec(env.CAPTCHA_BAN_SEC),
     allowedBotIds: parseAllowedBotIds(env.ALLOWED_BOT_IDS),
     dataFile: env.DATA_FILE ?? 'data/state.json',
     messagesFile: env.MESSAGES_FILE ?? 'data/messages.json',

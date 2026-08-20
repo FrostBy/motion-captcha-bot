@@ -16,8 +16,8 @@ export interface ChatApi {
   ): Promise<{ message_id: number }>;
   sendMessage(chatId: number, text: string): Promise<{ message_id: number }>;
   deleteMessage(chatId: number, messageId: number): Promise<unknown>;
-  banChatMember(chatId: number, userId: number): Promise<unknown>;
-  unbanChatMember(chatId: number, userId: number): Promise<unknown>;
+  banChatMember(chatId: number, userId: number, untilDate?: number): Promise<unknown>;
+  unbanChatMember(chatId: number, userId: number, onlyIfBanned?: boolean): Promise<unknown>;
   getChatMember(chatId: number, userId: number): Promise<{ status: ChatMemberStatus }>;
 }
 
@@ -39,6 +39,7 @@ export interface Deps {
   captchaSprinkle: number;
   captchaDecoy: boolean;
   captchaMaxAttempts: number;
+  captchaBanSec: number;
   allowedBotIds: ReadonlySet<number>;
   messages: Messages;
   log: (message: string, extra?: unknown) => void;
@@ -63,6 +64,8 @@ function fill(template: string, userId: number, firstName: string, timeoutSec: n
 
 /** How long the welcome message stays before it is cleaned up. */
 const WELCOME_TTL_MS = 30_000;
+/** Keep automatic-unban updates recognizable even when delivery is delayed. */
+const CHAT_MEMBER_UPDATE_GRACE_MS = 60_000;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -77,6 +80,22 @@ async function kick(deps: Deps, chatId: number, userId: number): Promise<void> {
   deps.state.markKicking(chatId, userId, deps.now?.() ?? Date.now());
   await withRetry(() => deps.api.banChatMember(chatId, userId));
   await quietly(() => deps.api.unbanChatMember(chatId, userId));
+}
+
+/** Ban a failed newcomer until Telegram automatically lets them try again. */
+async function banFailedNewcomer(deps: Deps, chatId: number, userId: number): Promise<void> {
+  const now = deps.now?.() ?? Date.now();
+  const untilDate = Math.floor(now / 1000) + deps.captchaBanSec;
+  deps.state.markKicking(
+    chatId,
+    userId,
+    now,
+    deps.captchaBanSec * 1000 + CHAT_MEMBER_UPDATE_GRACE_MS,
+  );
+  deps.state.markTemporarilyBanned(chatId, userId, untilDate * 1000);
+  // Persist the marker before Telegram can emit the matching status updates.
+  await deps.state.flush();
+  await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate));
 }
 
 export async function onJoin(deps: Deps, chatId: number, member: Member): Promise<void> {
@@ -148,6 +167,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
 /** A leave/status change proves the user was inside, a veteran. */
 export function onSeenInside(deps: Deps, chatId: number, userId: number): void {
   // Updates caused by our own ban/unban are not proof of membership.
+  if (deps.state.hasTemporaryBan(chatId, userId)) return;
   if (deps.state.isKicking(chatId, userId, deps.now?.() ?? Date.now())) return;
 
   const pending = deps.state.getPending(chatId, userId);
@@ -194,11 +214,11 @@ export async function onMessage(
   // Only the decoy layer is legible to frame analysis, so a match outs a bot.
   if (pending.decoyAnswer !== undefined && answer === String(pending.decoyAnswer)) {
     state.clearPending(chatId, userId);
-    deps.log('Decoy answered, kicking instantly', { chatId, userId });
+    deps.log('Decoy answered, banning temporarily', { chatId, userId });
     await quietly(() => api.deleteMessage(chatId, messageId));
     await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
-    await kick(deps, chatId, userId).catch((error) =>
-      deps.log(`Kick failed: ${errorText(error)}`, { chatId, userId }),
+    await banFailedNewcomer(deps, chatId, userId).catch((error) =>
+      deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
     );
     return;
   }
@@ -225,10 +245,10 @@ export async function onMessage(
     const attempts = (pending.attempts ?? 0) + 1;
     if (attempts >= deps.captchaMaxAttempts) {
       state.clearPending(chatId, userId);
-      deps.log('Out of attempts, kicking', { chatId, userId });
+      deps.log('Out of attempts, banning temporarily', { chatId, userId });
       await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
-      await kick(deps, chatId, userId).catch((error) =>
-        deps.log(`Kick failed: ${errorText(error)}`, { chatId, userId }),
+      await banFailedNewcomer(deps, chatId, userId).catch((error) =>
+        deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
       );
       return;
     }
@@ -236,18 +256,27 @@ export async function onMessage(
   }
 }
 
-/** Timer sweep: expired newcomers get kicked, restart survivors included. */
+/** Timer sweep: expired newcomers get temporarily banned, restart survivors included. */
 export async function sweepExpired(deps: Deps): Promise<void> {
   const now = deps.now?.() ?? Date.now();
+  for (const { chatId, userId, until } of deps.state.expiredTemporaryBans(now)) {
+    if (deps.state.getTemporaryBan(chatId, userId) !== until) continue;
+    try {
+      await withRetry(() => deps.api.unbanChatMember(chatId, userId, true));
+      deps.state.clearTemporaryBan(chatId, userId);
+    } catch (error) {
+      deps.log(`Automatic unban failed: ${errorText(error)}`, { chatId, userId });
+    }
+  }
   for (const { chatId, userId, pending } of deps.state.expired(now)) {
     // The batch is a snapshot: while earlier kicks were in flight this user
     // may have answered correctly (or left). Re-check before acting.
     const current = deps.state.getPending(chatId, userId);
     if (!current || current.captchaMessageId !== pending.captchaMessageId) continue;
     deps.state.clearPending(chatId, userId);
-    deps.log('Captcha expired, kicking', { chatId, userId });
-    await kick(deps, chatId, userId).catch((error) =>
-      deps.log(`Kick failed: ${errorText(error)}`, { chatId, userId }),
+    deps.log('Captcha expired, banning temporarily', { chatId, userId });
+    await banFailedNewcomer(deps, chatId, userId).catch((error) =>
+      deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
     );
     await quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
   }
