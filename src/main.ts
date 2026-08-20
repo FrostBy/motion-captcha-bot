@@ -18,7 +18,10 @@ state.load();
 state.startFlusher();
 
 const bot = new Bot(config.botToken, {
-  client: { environment: config.telegramTestMode ? 'test' : 'prod' },
+  client: {
+    environment: config.telegramTestMode ? 'test' : 'prod',
+    ...(config.telegramApiRoot ? { apiRoot: config.telegramApiRoot } : {}),
+  },
 });
 
 const api: ChatApi = {

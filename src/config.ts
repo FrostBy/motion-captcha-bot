@@ -24,6 +24,8 @@ export interface Config {
   ffmpegPath: string;
   /** Talk to Telegram's test environment instead of production. */
   telegramTestMode: boolean;
+  /** Optional Bot API root, used for compatible servers such as Telegym. */
+  telegramApiRoot?: string;
 }
 
 /**
@@ -74,5 +76,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     messagesFile: env.MESSAGES_FILE ?? 'data/messages.json',
     ffmpegPath: env.FFMPEG_PATH ?? 'ffmpeg',
     telegramTestMode: env.TELEGRAM_TEST_MODE === 'true',
+    telegramApiRoot: env.TELEGRAM_API_ROOT || undefined,
   };
 }
