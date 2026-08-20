@@ -64,6 +64,7 @@ English version: [README.md](README.md)
 | `FFMPEG_PATH` | `ffmpeg` | Бинарь ffmpeg (в Docker-образе уже есть) |
 | `TELEGRAM_TEST_MODE` | `false` | Работать с тестовым окружением Telegram |
 | `TELEGRAM_API_ROOT` | Telegram | Корень Bot API для совместимых серверов, например Telegym |
+| `CAPTCHA_TEST_SEED` | не задано | Детерминированный seed PRNG для интеграционных тестов; требует `TELEGRAM_API_ROOT` |
 
 ## Свои сообщения
 

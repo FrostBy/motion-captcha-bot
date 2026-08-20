@@ -7,6 +7,7 @@ import {
   makeDecoy,
   makeExpression,
   renderFrames,
+  seededRandom,
   type Motion,
   type Style,
 } from './captcha.js';
@@ -31,6 +32,12 @@ function averaged(frames: Uint8Array[]): Uint8Array {
 }
 
 describe('expression', () => {
+  it('generates a repeatable sequence from a test seed', () => {
+    const first = seededRandom(42);
+    const second = seededRandom(42);
+    expect(Array.from({ length: 8 }, first)).toEqual(Array.from({ length: 8 }, second));
+  });
+
   it('single-digit operands, answer is the sum', () => {
     for (let i = 0; i < 50; i++) {
       const { question, answer } = makeExpression();

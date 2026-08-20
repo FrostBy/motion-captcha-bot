@@ -64,6 +64,7 @@ Everything is configured through environment variables. No database, no admin pa
 | `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary (bundled in the Docker image) |
 | `TELEGRAM_TEST_MODE` | `false` | Talk to Telegram's test environment |
 | `TELEGRAM_API_ROOT` | Telegram | Bot API root for compatible servers such as Telegym |
+| `CAPTCHA_TEST_SEED` | unset | Deterministic PRNG seed for integration tests; requires `TELEGRAM_API_ROOT` |
 
 ## Custom messages
 

@@ -37,6 +37,7 @@ export interface Deps {
   messages: Messages;
   log: (message: string, extra?: unknown) => void;
   now?: () => number;
+  random?: () => number;
 }
 
 function escapeHtml(text: string): string {
@@ -89,8 +90,8 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
   const previous = state.getPending(chatId, member.id);
   if (previous) void quietly(() => api.deleteMessage(chatId, previous.captchaMessageId));
 
-  const captcha = makeExpression();
-  const decoy = deps.captchaDecoy ? makeDecoy(captcha.answer) : undefined;
+  const captcha = makeExpression(deps.random);
+  const decoy = deps.captchaDecoy ? makeDecoy(captcha.answer, deps.random) : undefined;
   let video: Uint8Array;
   try {
     video = await renderAnimation(captcha.question, deps.ffmpegPath, {
@@ -98,6 +99,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
       motion: deps.captchaMotion,
       sprinkle: deps.captchaSprinkle,
       decoyQuestion: decoy?.question,
+      random: deps.random,
     });
   } catch (error) {
     // Keeping someone pending with no captcha is unfair, let them in loudly.

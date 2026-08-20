@@ -1,5 +1,6 @@
 import { Bot, InputFile } from 'grammy';
 
+import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import {
   onJoin,
@@ -49,6 +50,7 @@ const deps: Deps = {
   captchaMaxAttempts: config.captchaMaxAttempts,
   messages: loadMessages(config.messagesFile),
   log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
+  random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
 
 // Joins and leaves: chat_member arrives only when explicitly polled for.
