@@ -17,6 +17,8 @@ export interface Config {
   captchaDecoy: boolean;
   /** Wrong numeric answers allowed before the kick. */
   captchaMaxAttempts: number;
+  /** Bots allowed regardless of who added them. */
+  allowedBotIds: ReadonlySet<number>;
   dataFile: string;
   /** Optional JSON file with message templates, see `Messages`. */
   messagesFile: string;
@@ -44,6 +46,23 @@ export const DEFAULT_MESSAGES: Messages = {
     '%username%, prove you are human: reply with the number within %timer% seconds or say goodbye.',
   welcome: '%username%, one of us. Welcome aboard.',
 };
+
+function parseAllowedBotIds(value: string | undefined): ReadonlySet<number> {
+  if (!value?.trim()) return new Set();
+  const ids = new Set<number>();
+  for (const item of value.split(',')) {
+    const raw = item.trim();
+    if (!/^\d+$/.test(raw)) {
+      throw new Error('ALLOWED_BOT_IDS must be a comma-separated list of positive integers');
+    }
+    const id = Number(raw);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new Error('ALLOWED_BOT_IDS must be a comma-separated list of positive integers');
+    }
+    ids.add(id);
+  }
+  return ids;
+}
 
 /** Missing file means defaults; a broken one is a loud config error. */
 export function loadMessages(file: string): Messages {
@@ -88,6 +107,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captchaDecoy: env.CAPTCHA_DECOY === 'true',
     captchaMaxAttempts:
       Number(env.CAPTCHA_MAX_ATTEMPTS) > 0 ? Math.floor(Number(env.CAPTCHA_MAX_ATTEMPTS)) : 3,
+    allowedBotIds: parseAllowedBotIds(env.ALLOWED_BOT_IDS),
     dataFile: env.DATA_FILE ?? 'data/state.json',
     messagesFile: env.MESSAGES_FILE ?? 'data/messages.json',
     ffmpegPath: env.FFMPEG_PATH ?? 'ffmpeg',

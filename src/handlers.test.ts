@@ -48,6 +48,7 @@ function setup(now = 1_000_000): { deps: Deps; api: Record<string, ReturnType<ty
     captchaSprinkle: 0,
     captchaDecoy: false,
     captchaMaxAttempts: 3,
+    allowedBotIds: new Set(),
     messages: DEFAULT_MESSAGES,
     log: vi.fn(),
     now: () => now,
@@ -168,6 +169,16 @@ describe('newcomer greeting', () => {
 });
 
 describe('bots', () => {
+  it('an explicitly allowed bot stays without checking its adder', async () => {
+    const { deps, api } = setup();
+    deps.allowedBotIds = new Set([899]);
+
+    await onJoin(deps, CHAT, { id: 899, isBot: true, firstName: 'Bot', addedBy: 7 });
+
+    expect(api.getChatMember).not.toHaveBeenCalled();
+    expect(api.banChatMember).not.toHaveBeenCalled();
+  });
+
   it('a bot added by an admin stays', async () => {
     const { deps, api } = setup();
     api.getChatMember!.mockResolvedValueOnce({ status: 'administrator' });

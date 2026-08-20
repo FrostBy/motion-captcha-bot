@@ -7,6 +7,21 @@ describe('loadConfig', () => {
     expect(loadConfig({ BOT_TOKEN: '123:test' }).telegramApiRoot).toBeUndefined();
   });
 
+  it('accepts a comma-separated bot allowlist', () => {
+    const config = loadConfig({
+      BOT_TOKEN: '123:test',
+      ALLOWED_BOT_IDS: '123, 456,123',
+    });
+
+    expect([...config.allowedBotIds]).toEqual([123, 456]);
+  });
+
+  it('rejects an invalid bot allowlist', () => {
+    expect(() =>
+      loadConfig({ BOT_TOKEN: '123:test', ALLOWED_BOT_IDS: '123,nope' }),
+    ).toThrow('ALLOWED_BOT_IDS must be a comma-separated list of positive integers');
+  });
+
   it('accepts a compatible Telegram API server root', () => {
     expect(
       loadConfig({

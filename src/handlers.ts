@@ -39,6 +39,7 @@ export interface Deps {
   captchaSprinkle: number;
   captchaDecoy: boolean;
   captchaMaxAttempts: number;
+  allowedBotIds: ReadonlySet<number>;
   messages: Messages;
   log: (message: string, extra?: unknown) => void;
   now?: () => number;
@@ -82,6 +83,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
   const { api, state } = deps;
 
   if (member.isBot) {
+    if (deps.allowedBotIds.has(member.id)) return;
     let addedByAdmin = false;
     try {
       const adder = await withRetry(() => api.getChatMember(chatId, member.addedBy));

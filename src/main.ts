@@ -49,6 +49,7 @@ const deps: Deps = {
   captchaSprinkle: config.captchaSprinkle,
   captchaDecoy: config.captchaDecoy,
   captchaMaxAttempts: config.captchaMaxAttempts,
+  allowedBotIds: config.allowedBotIds,
   messages: loadMessages(config.messagesFile),
   log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),

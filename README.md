@@ -59,6 +59,7 @@ Everything is configured through environment variables. No database, no admin pa
 | `CAPTCHA_SPRINKLE` | `0` | Share of pixels re-seeded with fresh noise each frame, `0..1` (e.g. `0.01`); raises analysis cost, costs readability and file size |
 | `CAPTCHA_DECOY` | `false` | Bake in a faint fake expression; answering it kicks instantly |
 | `CAPTCHA_MAX_ATTEMPTS` | `3` | Wrong numeric answers allowed before the kick (chatter is only deleted, not counted) |
+| `ALLOWED_BOT_IDS` | unset | Comma-separated numeric bot IDs allowed regardless of who added them; other bots must be added by an administrator |
 | `DATA_FILE` | `data/state.json` | State snapshot location |
 | `MESSAGES_FILE` | `data/messages.json` | Optional message templates, see below |
 | `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary (bundled in the Docker image) |
