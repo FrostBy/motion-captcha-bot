@@ -1,5 +1,6 @@
 import { Bot, InputFile } from 'grammy';
 
+import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import {
   onJoin,
@@ -18,7 +19,10 @@ state.load();
 state.startFlusher();
 
 const bot = new Bot(config.botToken, {
-  client: { environment: config.telegramTestMode ? 'test' : 'prod' },
+  client: {
+    environment: config.telegramTestMode ? 'test' : 'prod',
+    ...(config.telegramApiRoot ? { apiRoot: config.telegramApiRoot } : {}),
+  },
 });
 
 const api: ChatApi = {
@@ -46,6 +50,7 @@ const deps: Deps = {
   captchaMaxAttempts: config.captchaMaxAttempts,
   messages: loadMessages(config.messagesFile),
   log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
+  random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
 
 // Joins and leaves: chat_member arrives only when explicitly polled for.
