@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  nixos-test:
+    name: NixOS test
+    runs-on: ubuntu-latest
+    env:
+      NIX_CONFIG: system-features = benchmark big-parallel nixos-test uid-range
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+        with:
+          determinate: false
+          extra-conf: |
+            auto-allocate-uids = true
+            extra-experimental-features = auto-allocate-uids cgroups
+            extra-system-features = uid-range
+
+      - name: Run NixOS test
+        run: nix build .#checks.x86_64-linux.nixos-service --print-build-logs
