@@ -21,6 +21,8 @@ export interface Config {
   captchaBanSec: number;
   /** Bots allowed regardless of who added them. */
   allowedBotIds: ReadonlySet<number>;
+  /** Chats served by the bot; an empty set allows every chat. */
+  allowedChatIds: ReadonlySet<number>;
   dataFile: string;
   /** Optional JSON file with message templates, see `Messages`. */
   messagesFile: string;
@@ -60,6 +62,23 @@ function parseAllowedBotIds(value: string | undefined): ReadonlySet<number> {
     const id = Number(raw);
     if (!Number.isSafeInteger(id) || id <= 0) {
       throw new Error('ALLOWED_BOT_IDS must be a comma-separated list of positive integers');
+    }
+    ids.add(id);
+  }
+  return ids;
+}
+
+function parseAllowedChatIds(value: string | undefined): ReadonlySet<number> {
+  if (!value?.trim()) return new Set();
+  const ids = new Set<number>();
+  for (const item of value.split(',')) {
+    const raw = item.trim();
+    if (!/^-?\d+$/.test(raw)) {
+      throw new Error('ALLOWED_CHAT_IDS must be a comma-separated list of nonzero integers');
+    }
+    const id = Number(raw);
+    if (!Number.isSafeInteger(id) || id === 0) {
+      throw new Error('ALLOWED_CHAT_IDS must be a comma-separated list of nonzero integers');
     }
     ids.add(id);
   }
@@ -132,6 +151,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       Number(env.CAPTCHA_MAX_ATTEMPTS) > 0 ? Math.floor(Number(env.CAPTCHA_MAX_ATTEMPTS)) : 3,
     captchaBanSec: parseCaptchaBanSec(env.CAPTCHA_BAN_SEC),
     allowedBotIds: parseAllowedBotIds(env.ALLOWED_BOT_IDS),
+    allowedChatIds: parseAllowedChatIds(env.ALLOWED_CHAT_IDS),
     dataFile: env.DATA_FILE ?? 'data/state.json',
     messagesFile: env.MESSAGES_FILE ?? 'data/messages.json',
     ffmpegPath: env.FFMPEG_PATH ?? 'ffmpeg',

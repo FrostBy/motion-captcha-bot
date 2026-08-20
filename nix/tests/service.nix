@@ -49,6 +49,7 @@ pkgs.testers.nixosTest {
         CAPTCHA_TEST_SEED = "42";
         CAPTCHA_DECOY = "true";
         CAPTCHA_TIMEOUT_SEC = "4";
+        ALLOWED_CHAT_IDS = toString chatId;
       };
     };
 
@@ -134,6 +135,22 @@ pkgs.testers.nixosTest {
             "new_status": "member",
         })
         return wait_for_message(lambda message: "animation" in message, "captcha animation")
+
+    with subtest("ignore a chat outside the allowlist"):
+        clear_observations()
+        inject({
+            "type": "chat_member",
+            "chat_id": ${toString (chatId - 1)},
+            "chat_type": "supergroup",
+            "chat_title": "Disallowed test",
+            "user_id": 6,
+            "first_name": "Mallory",
+            "actor_id": 6,
+            "old_status": "left",
+            "new_status": "member",
+        })
+        time.sleep(1)
+        assert api_requests("sendAnimation") == [], api_requests("sendAnimation")
 
     with subtest("accept an edited correct answer"):
         clear_observations()

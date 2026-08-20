@@ -61,6 +61,7 @@ Everything is configured through environment variables. No database, no admin pa
 | `CAPTCHA_MAX_ATTEMPTS` | `3` | Wrong numeric answers allowed before the ban (chatter is only deleted, not counted) |
 | `CAPTCHA_BAN_SEC` | `300` | Seconds a newcomer remains banned after failing the captcha (`60..31536000`) |
 | `ALLOWED_BOT_IDS` | unset | Comma-separated numeric bot IDs allowed regardless of who added them; other bots must be added by an administrator |
+| `ALLOWED_CHAT_IDS` | unset | Comma-separated numeric chat IDs served by the bot; unset or empty allows every chat |
 | `DATA_FILE` | `data/state.json` | State snapshot location |
 | `MESSAGES_FILE` | `data/messages.json` | Optional message templates, see below |
 | `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary (bundled in the Docker image) |

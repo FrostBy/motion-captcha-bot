@@ -34,6 +34,25 @@ describe('loadConfig', () => {
     ).toThrow('ALLOWED_BOT_IDS must be a comma-separated list of positive integers');
   });
 
+  it('accepts a comma-separated chat allowlist', () => {
+    const config = loadConfig({
+      BOT_TOKEN: '123:test',
+      ALLOWED_CHAT_IDS: '-100123, -456,-100123',
+    });
+
+    expect([...config.allowedChatIds]).toEqual([-100123, -456]);
+  });
+
+  it('allows every chat when the chat allowlist is unset', () => {
+    expect(loadConfig({ BOT_TOKEN: '123:test' }).allowedChatIds.size).toBe(0);
+  });
+
+  it('rejects an invalid chat allowlist', () => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', ALLOWED_CHAT_IDS: '0,nope' })).toThrow(
+      'ALLOWED_CHAT_IDS must be a comma-separated list of nonzero integers',
+    );
+  });
+
   it('accepts a compatible Telegram API server root', () => {
     expect(
       loadConfig({

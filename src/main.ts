@@ -62,6 +62,16 @@ const deps: Deps = {
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
 
+// An empty allowlist preserves the default of serving every chat. Filtering
+// here prevents disallowed chats from reaching rendering or mutable state.
+bot.use(async (ctx, next) => {
+  const chatId = ctx.chat?.id;
+  if (chatId !== undefined && config.allowedChatIds.size > 0 && !config.allowedChatIds.has(chatId)) {
+    return;
+  }
+  await next();
+});
+
 // Joins and leaves: chat_member arrives only when explicitly polled for.
 bot.on('chat_member', async (ctx) => {
   const update = ctx.chatMember;
