@@ -2,9 +2,15 @@
   description = "Motion-readable Telegram captcha bot";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.telegym.url = "github:booxter/telegym/lolek-missing-features";
 
   outputs =
-    { nixpkgs, ... }:
+    {
+      self,
+      nixpkgs,
+      telegym,
+      ...
+    }:
     let
       supportedSystems = [
         "aarch64-darwin"
@@ -25,6 +31,24 @@
           default = motion-captcha-bot;
         }
       );
+
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          nixos-service = import ./nix/tests/service.nix {
+            inherit pkgs;
+            module = self.nixosModules.default;
+            package = self.packages.${system}.motion-captcha-bot;
+            telegymModule = telegym.nixosModules.default;
+            telegymPackage = telegym.packages.${system}.telegym;
+          };
+        }
+      );
+
+      nixosModules.default = import ./nix/module.nix { inherit self; };
 
       devShells = forAllSystems (
         system:
