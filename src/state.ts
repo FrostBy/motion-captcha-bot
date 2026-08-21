@@ -12,7 +12,7 @@ export interface Pending {
   deadline: number;
   /** The captcha message, deleted whatever the outcome. */
   captchaMessageId: number;
-  /** Wrong answers so far; too many of them means a kick. */
+  /** Wrong answers so far; too many of them means a temporary ban. */
   attempts?: number;
   /** For the %username% placeholder in the welcome message. */
   firstName?: string;
@@ -32,19 +32,24 @@ interface ChatState {
 
 interface Snapshot {
   chats: Record<string, ChatState>;
+  kicks?: Record<string, number>;
+  temporaryBans?: Record<string, number>;
 }
 
 /**
  * In-memory state with an on-disk snapshot: written every interval when
- * dirty and on shutdown, atomically (tmp + rename). Losing the last few
- * seconds is fine: worst case someone sees the captcha twice.
+ * dirty and on shutdown, atomically (tmp + rename). Temporary-ban markers
+ * are explicitly flushed before the matching Telegram moderation call.
  */
 export class State {
   private chats = new Map<number, { passed: Set<number>; pending: Map<number, Pending> }>();
-  /** In-flight/recent kicks by "chatId:userId", value is the marker expiry. Not persisted. */
+  /** In-flight/recent kicks by "chatId:userId", value is the marker expiry. */
   private kicks = new Map<string, number>();
+  /** Captcha bans by "chatId:userId", value is the scheduled unban time. */
+  private temporaryBans = new Map<string, number>();
   private dirty = false;
   private timer?: NodeJS.Timeout;
+  private flushQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly file: string,
@@ -73,6 +78,8 @@ export class State {
         });
       }
       this.chats = chats;
+      this.kicks = new Map(Object.entries(snapshot.kicks ?? {}));
+      this.temporaryBans = new Map(Object.entries(snapshot.temporaryBans ?? {}));
     } catch {
       warn(`Snapshot ${this.file} does not parse, starting empty`);
     }
@@ -89,9 +96,20 @@ export class State {
   }
 
   async flush(): Promise<void> {
+    const queued = this.flushQueue.then(() => this.flushDirty());
+    // Keep the queue usable after an individual caller observes a write error.
+    this.flushQueue = queued.catch(() => undefined);
+    await queued;
+  }
+
+  private async flushDirty(): Promise<void> {
     if (!this.dirty) return;
     this.dirty = false;
-    const snapshot: Snapshot = { chats: {} };
+    const snapshot: Snapshot = {
+      chats: {},
+      kicks: Object.fromEntries(this.kicks),
+      temporaryBans: Object.fromEntries(this.temporaryBans),
+    };
     for (const [chatId, chat] of this.chats) {
       snapshot.chats[chatId] = {
         passed: [...chat.passed],
@@ -100,8 +118,13 @@ export class State {
     }
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    await writeFile(tmp, JSON.stringify(snapshot));
-    await rename(tmp, this.file);
+    try {
+      await writeFile(tmp, JSON.stringify(snapshot));
+      await rename(tmp, this.file);
+    } catch (error) {
+      this.dirty = true;
+      throw error;
+    }
   }
 
   private chat(chatId: number) {
@@ -140,8 +163,9 @@ export class State {
   }
 
   /** Remember that the bot itself is kicking this user right now. */
-  markKicking(chatId: number, userId: number, now: number): void {
-    this.kicks.set(`${chatId}:${userId}`, now + KICK_MARKER_TTL_MS);
+  markKicking(chatId: number, userId: number, now: number, ttlMs = KICK_MARKER_TTL_MS): void {
+    this.kicks.set(`${chatId}:${userId}`, now + ttlMs);
+    this.dirty = true;
   }
 
   /** Is a recent kick of this user ours? Expired markers are swept lazily. */
@@ -151,13 +175,51 @@ export class State {
     if (until === undefined) return false;
     if (until <= now) {
       this.kicks.delete(key);
+      this.dirty = true;
       return false;
     }
     return true;
   }
 
-  /** Everyone expired as of `now`, to be kicked, restart survivors included. */
+  markTemporarilyBanned(chatId: number, userId: number, until: number): void {
+    this.temporaryBans.set(`${chatId}:${userId}`, until);
+    this.dirty = true;
+  }
+
+  hasTemporaryBan(chatId: number, userId: number): boolean {
+    return this.temporaryBans.has(`${chatId}:${userId}`);
+  }
+
+  getTemporaryBan(chatId: number, userId: number): number | undefined {
+    return this.temporaryBans.get(`${chatId}:${userId}`);
+  }
+
+  clearTemporaryBan(chatId: number, userId: number): void {
+    if (this.temporaryBans.delete(`${chatId}:${userId}`)) this.dirty = true;
+  }
+
+  expiredTemporaryBans(now: number): Array<{ chatId: number; userId: number; until: number }> {
+    const out: Array<{ chatId: number; userId: number; until: number }> = [];
+    for (const [key, until] of this.temporaryBans) {
+      if (until > now) continue;
+      const separator = key.lastIndexOf(':');
+      out.push({
+        chatId: Number(key.slice(0, separator)),
+        userId: Number(key.slice(separator + 1)),
+        until,
+      });
+    }
+    return out;
+  }
+
+  /** Everyone expired as of `now`, to be moderated, restart survivors included. */
   expired(now: number): Array<{ chatId: number; userId: number; pending: Pending }> {
+    for (const [key, until] of this.kicks) {
+      if (until <= now) {
+        this.kicks.delete(key);
+        this.dirty = true;
+      }
+    }
     const out: Array<{ chatId: number; userId: number; pending: Pending }> = [];
     for (const [chatId, chat] of this.chats) {
       for (const [userId, pending] of chat.pending) {

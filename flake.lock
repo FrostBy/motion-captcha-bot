@@ -1,0 +1,63 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1787135253,
+        "narHash": "sha256-RD2kNWCG+Bjo6h+JVjWVNntZs2GtRoeY2xHjts/FNkA=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "ffb3c9b700e759be2ef13237c9d8f953b32a1e46",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1787261707,
+        "narHash": "sha256-/8bk8YV9ih1/dI723eQks6a8L4bdDiMxh3bkPiHNVno=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d7ddb26e62a258b802b4fa853be68a37259641a5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "release-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "telegym": "telegym"
+      }
+    },
+    "telegym": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1787265683,
+        "narHash": "sha256-KpRAq5nOFM59nCNyGJZIadCUUBQeS8d9oMNLuw6qvEw=",
+        "owner": "booxter",
+        "repo": "telegym",
+        "rev": "25d3da8e9271e95006e6cf682921dd4945d27d23",
+        "type": "github"
+      },
+      "original": {
+        "owner": "booxter",
+        "ref": "lolek-missing-features",
+        "repo": "telegym",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

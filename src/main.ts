@@ -1,5 +1,6 @@
 import { Bot, InputFile } from 'grammy';
 
+import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import {
   onJoin,
@@ -18,7 +19,10 @@ state.load();
 state.startFlusher();
 
 const bot = new Bot(config.botToken, {
-  client: { environment: config.telegramTestMode ? 'test' : 'prod' },
+  client: {
+    environment: config.telegramTestMode ? 'test' : 'prod',
+    ...(config.telegramApiRoot ? { apiRoot: config.telegramApiRoot } : {}),
+  },
 });
 
 const api: ChatApi = {
@@ -30,8 +34,15 @@ const api: ChatApi = {
     }),
   sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' }),
   deleteMessage: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
-  banChatMember: (chatId, userId) => bot.api.banChatMember(chatId, userId),
-  unbanChatMember: (chatId, userId) => bot.api.unbanChatMember(chatId, userId),
+  banChatMember: (chatId, userId, untilDate) =>
+    bot.api.banChatMember(chatId, userId, untilDate === undefined ? {} : { until_date: untilDate }),
+  unbanChatMember: (chatId, userId, onlyIfBanned) =>
+    bot.api.unbanChatMember(
+      chatId,
+      userId,
+      onlyIfBanned === undefined ? {} : { only_if_banned: onlyIfBanned },
+    ),
+  getChatMember: (chatId, userId) => bot.api.getChatMember(chatId, userId),
 };
 
 const deps: Deps = {
@@ -44,9 +55,22 @@ const deps: Deps = {
   captchaSprinkle: config.captchaSprinkle,
   captchaDecoy: config.captchaDecoy,
   captchaMaxAttempts: config.captchaMaxAttempts,
+  captchaBanSec: config.captchaBanSec,
+  allowedBotIds: config.allowedBotIds,
   messages: loadMessages(config.messagesFile),
   log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
+  random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
+
+// An empty allowlist preserves the default of serving every chat. Filtering
+// here prevents disallowed chats from reaching rendering or mutable state.
+bot.use(async (ctx, next) => {
+  const chatId = ctx.chat?.id;
+  if (chatId !== undefined && config.allowedChatIds.size > 0 && !config.allowedChatIds.has(chatId)) {
+    return;
+  }
+  await next();
+});
 
 // Joins and leaves: chat_member arrives only when explicitly polled for.
 bot.on('chat_member', async (ctx) => {

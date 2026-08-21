@@ -1,0 +1,90 @@
+import { describe, expect, it } from 'vitest';
+
+import { loadConfig } from './config.js';
+
+describe('loadConfig', () => {
+  it('leaves the Telegram API root unset by default', () => {
+    const config = loadConfig({ BOT_TOKEN: '123:test' });
+    expect(config.telegramApiRoot).toBeUndefined();
+    expect(config.captchaBanSec).toBe(300);
+  });
+
+  it('accepts a temporary captcha ban duration', () => {
+    expect(loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_BAN_SEC: '600' }).captchaBanSec).toBe(600);
+  });
+
+  it('rejects a ban duration too close to Telegram\'s permanent-ban cutoff', () => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_BAN_SEC: '30' })).toThrow(
+      'CAPTCHA_BAN_SEC must be an integer from 60 to 31536000',
+    );
+  });
+
+  it('accepts a comma-separated bot allowlist', () => {
+    const config = loadConfig({
+      BOT_TOKEN: '123:test',
+      ALLOWED_BOT_IDS: '123, 456,123',
+    });
+
+    expect([...config.allowedBotIds]).toEqual([123, 456]);
+  });
+
+  it('rejects an invalid bot allowlist', () => {
+    expect(() =>
+      loadConfig({ BOT_TOKEN: '123:test', ALLOWED_BOT_IDS: '123,nope' }),
+    ).toThrow('ALLOWED_BOT_IDS must be a comma-separated list of positive integers');
+  });
+
+  it('accepts a comma-separated chat allowlist', () => {
+    const config = loadConfig({
+      BOT_TOKEN: '123:test',
+      ALLOWED_CHAT_IDS: '-100123, -456,-100123',
+    });
+
+    expect([...config.allowedChatIds]).toEqual([-100123, -456]);
+  });
+
+  it('allows every chat when the chat allowlist is unset', () => {
+    expect(loadConfig({ BOT_TOKEN: '123:test' }).allowedChatIds.size).toBe(0);
+  });
+
+  it('rejects an invalid chat allowlist', () => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', ALLOWED_CHAT_IDS: '0,nope' })).toThrow(
+      'ALLOWED_CHAT_IDS must be a comma-separated list of nonzero integers',
+    );
+  });
+
+  it('accepts a compatible Telegram API server root', () => {
+    expect(
+      loadConfig({
+        BOT_TOKEN: '123:test',
+        TELEGRAM_API_ROOT: 'http://telegym.test:5678',
+      }).telegramApiRoot,
+    ).toBe('http://telegym.test:5678');
+  });
+
+  it('accepts a deterministic captcha seed with a custom API root', () => {
+    expect(
+      loadConfig({
+        BOT_TOKEN: '123:test',
+        TELEGRAM_API_ROOT: 'http://telegym.test:5678',
+        CAPTCHA_TEST_SEED: '42',
+      }).captchaTestSeed,
+    ).toBe(42);
+  });
+
+  it('rejects a deterministic captcha seed against Telegram', () => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_TEST_SEED: '42' })).toThrow(
+      'CAPTCHA_TEST_SEED requires TELEGRAM_API_ROOT',
+    );
+  });
+
+  it('rejects an invalid deterministic captcha seed', () => {
+    expect(() =>
+      loadConfig({
+        BOT_TOKEN: '123:test',
+        TELEGRAM_API_ROOT: 'http://telegym.test:5678',
+        CAPTCHA_TEST_SEED: '-1',
+      }),
+    ).toThrow('CAPTCHA_TEST_SEED must be an unsigned 32-bit integer');
+  });
+});

@@ -18,14 +18,14 @@ On top of the base mechanics there are optional shields against automated video 
 |---|---|---|
 | Motion preset 2 | Both layers move in the same direction with different, sine-wobbling speeds | Shift-matching: contrasting `+shift` vs `-shift` match maps yields nothing, and no constant inter-frame offset exists |
 | Sprinkle | Re-seeds a share of pixels with fresh noise every frame | Dirties optical-flow and match maps; the eye averages the flicker out |
-| Decoy | Bakes a faint static fake expression into the field | Frame averaging reveals the fake instead of the answer, and replying with the fake sum gets an instant kick |
+| Decoy | Bakes a faint static fake expression into the field | Frame averaging reveals the fake instead of the answer, and replying with the fake sum triggers the temporary ban |
 
 ## Moderation rules
 
-- A newcomer must reply with the correct number within the timeout (60 s by default), silence means a kick. Rejoining is allowed.
+- A newcomer must reply with the correct number within the timeout (60 s by default); failure means a temporary ban (5 min by default), after which rejoining is allowed.
 - Every message from a pending newcomer except the correct answer is deleted.
 - Members seen before, and anyone who already passed, never get a captcha.
-- Bots added by a member stay; bots that join on their own are kicked.
+- Allowlisted bots and bots added by an administrator stay; other bots are kicked.
 - If captcha rendering fails, the newcomer is let through with a loud log line, so nobody gets trapped by an infrastructure problem.
 
 State is a JSON snapshot on disk: held in memory, flushed atomically every few seconds and on shutdown. Restarts lose nothing that matters.
@@ -57,12 +57,17 @@ Everything is configured through environment variables. No database, no admin pa
 | `CAPTCHA_STYLE` | `l` | Noise look: `l` for 2px bands, `g` for 1px bands, `dots` for sparse subpixel dots |
 | `CAPTCHA_MOTION` | `1` | `1` moves the layers in opposite directions, `2` moves them in the same direction with wobbling speeds (anti shift-matching) |
 | `CAPTCHA_SPRINKLE` | `0` | Share of pixels re-seeded with fresh noise each frame, `0..1` (e.g. `0.01`); raises analysis cost, costs readability and file size |
-| `CAPTCHA_DECOY` | `false` | Bake in a faint fake expression; answering it kicks instantly |
-| `CAPTCHA_MAX_ATTEMPTS` | `3` | Wrong numeric answers allowed before the kick (chatter is only deleted, not counted) |
+| `CAPTCHA_DECOY` | `false` | Bake in a faint fake expression; answering it triggers the temporary ban |
+| `CAPTCHA_MAX_ATTEMPTS` | `3` | Wrong numeric answers allowed before the ban (chatter is only deleted, not counted) |
+| `CAPTCHA_BAN_SEC` | `300` | Seconds a newcomer remains banned after failing the captcha (`60..31536000`) |
+| `ALLOWED_BOT_IDS` | unset | Comma-separated numeric bot IDs allowed regardless of who added them; other bots must be added by an administrator |
+| `ALLOWED_CHAT_IDS` | unset | Comma-separated numeric chat IDs served by the bot; unset or empty allows every chat |
 | `DATA_FILE` | `data/state.json` | State snapshot location |
 | `MESSAGES_FILE` | `data/messages.json` | Optional message templates, see below |
 | `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary (bundled in the Docker image) |
 | `TELEGRAM_TEST_MODE` | `false` | Talk to Telegram's test environment |
+| `TELEGRAM_API_ROOT` | Telegram | Bot API root for compatible servers such as Telegym |
+| `CAPTCHA_TEST_SEED` | unset | Deterministic PRNG seed for integration tests; requires `TELEGRAM_API_ROOT` |
 
 ## Custom messages
 
