@@ -28,6 +28,13 @@ export interface Config {
   /** Days a passed user is remembered; 0 keeps them forever. */
   passedTtlDays: number;
   /**
+   * Seconds an update may have waited in Telegram's queue before the bot
+   * ignores it. A bot that was down returns to a backlog of up to a day and
+   * would greet people who joined long ago, some of them already dealt with
+   * by hand. 0 disables the check.
+   */
+  maxUpdateAgeSec: number;
+  /**
    * Digits per operand. 1 keeps the glyphs large and the arithmetic instant;
    * 2 widens the answer space from nineteen sums to about a hundred and
    * eighty, at the price of a smaller glyph and more thinking.
@@ -120,6 +127,24 @@ function parseCaptchaBanSec(value: string | undefined): number {
   return seconds;
 }
 
+/**
+ * Long enough that a restart or a short outage still greets the newcomers it
+ * missed, short enough that a day-old backlog is dropped.
+ */
+const DEFAULT_MAX_UPDATE_AGE_SEC = 300;
+
+function parseMaxUpdateAgeSec(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_MAX_UPDATE_AGE_SEC;
+  if (!/^\d+$/.test(value)) {
+    throw new Error('MAX_UPDATE_AGE_SEC must be a non-negative integer');
+  }
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds)) {
+    throw new Error('MAX_UPDATE_AGE_SEC must be a non-negative integer');
+  }
+  return seconds;
+}
+
 function parsePassedTtlDays(value: string | undefined): number {
   if (value === undefined || value === '') return 0;
   if (!/^\d+$/.test(value)) {
@@ -178,6 +203,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captchaBanSec: parseCaptchaBanSec(env.CAPTCHA_BAN_SEC),
     captchaFailClosed: env.CAPTCHA_FAIL_CLOSED === 'true',
     passedTtlDays: parsePassedTtlDays(env.PASSED_TTL_DAYS),
+    maxUpdateAgeSec: parseMaxUpdateAgeSec(env.MAX_UPDATE_AGE_SEC),
     captchaOperandDigits: env.CAPTCHA_OPERAND_DIGITS === '2' ? 2 : 1,
     allowedBotIds: parseAllowedBotIds(env.ALLOWED_BOT_IDS),
     allowedChatIds: parseAllowedChatIds(env.ALLOWED_CHAT_IDS),

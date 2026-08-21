@@ -152,6 +152,12 @@ describe('failure policy and retention knobs', () => {
 
     expect(config.captchaFailClosed).toBe(true);
   });
+
+  it('drops stale updates by default, and zero switches that off', () => {
+    expect(loadConfig({ BOT_TOKEN: '123:test' }).maxUpdateAgeSec).toBe(300);
+    expect(loadConfig({ BOT_TOKEN: '123:test', MAX_UPDATE_AGE_SEC: '30' }).maxUpdateAgeSec).toBe(30);
+    expect(loadConfig({ BOT_TOKEN: '123:test', MAX_UPDATE_AGE_SEC: '0' }).maxUpdateAgeSec).toBe(0);
+  });
 });
 
 describe('allowlist and range guards', () => {
@@ -164,6 +170,7 @@ describe('allowlist and range guards', () => {
     ['a ban longer than a year', { CAPTCHA_BAN_SEC: '40000000' }, 'CAPTCHA_BAN_SEC'],
     ['a ban that is not a number', { CAPTCHA_BAN_SEC: 'soon' }, 'CAPTCHA_BAN_SEC'],
     ['a retention window past the safe integer range', { PASSED_TTL_DAYS: '99999999999999999999' }, 'PASSED_TTL_DAYS'],
+    ['an update age that is not a number', { MAX_UPDATE_AGE_SEC: 'lately' }, 'MAX_UPDATE_AGE_SEC'],
     ['a seed past 32 bits', { CAPTCHA_TEST_SEED: '4294967296', TELEGRAM_API_ROOT: 'http://127.0.0.1:5678' }, 'CAPTCHA_TEST_SEED'],
   ];
 

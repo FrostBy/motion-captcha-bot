@@ -44,7 +44,14 @@ function fakeBot() {
   };
 }
 
-function setup(allowedChatIds: ReadonlySet<number> = new Set()): {
+/** Fixed clock so update ages in the tests are exact seconds. */
+const NOW_MS = 1_700_000_000_000;
+const NOW_SEC = Math.floor(NOW_MS / 1000);
+
+function setup(
+  allowedChatIds: ReadonlySet<number> = new Set(),
+  maxUpdateAgeSec = 0,
+): {
   bot: ReturnType<typeof fakeBot>;
   wiring: Wiring;
 } {
@@ -52,7 +59,8 @@ function setup(allowedChatIds: ReadonlySet<number> = new Set()): {
   const wiring: Wiring = {
     allowedChatIds,
     gate: createSerialGate(),
-    deps: { log: vi.fn() } as unknown as Deps,
+    maxUpdateAgeSec,
+    deps: { log: vi.fn(), now: () => NOW_MS } as unknown as Deps,
   };
   registerHandlers(bot as never, wiring);
   return { bot, wiring };
@@ -181,6 +189,61 @@ describe('update wiring', () => {
 
   it('an empty allowlist serves every chat', async () => {
     const { bot } = setup(new Set());
+
+    await bot.deliver('chat_member', chatMember());
+
+    expect(handlers.onJoin).toHaveBeenCalled();
+  });
+
+  // Telegram holds undelivered updates for a day, so a bot that was down
+  // wakes up to a backlog: captchas for people who joined hours ago, some of
+  // them banned by hand in the meantime.
+  it('a join older than the limit is dropped', async () => {
+    const { bot, wiring } = setup(new Set(), 300);
+
+    await bot.deliver('chat_member', chatMember({ date: NOW_SEC - 3600 }));
+
+    expect(handlers.onJoin).not.toHaveBeenCalled();
+    expect(wiring.deps.log).toHaveBeenCalledWith(
+      expect.stringContaining('3600s old'),
+      expect.anything(),
+    );
+  });
+
+  it('a join within the limit still gets a captcha', async () => {
+    const { bot } = setup(new Set(), 300);
+
+    await bot.deliver('chat_member', chatMember({ date: NOW_SEC - 30 }));
+
+    expect(handlers.onJoin).toHaveBeenCalled();
+  });
+
+  it('a stale answer to a captcha nobody waits for is dropped', async () => {
+    const { bot } = setup(new Set(), 300);
+    const base = { chat: { id: CHAT, type: 'supergroup' }, from: { id: 7, is_bot: false } };
+
+    await bot.deliver('message', {
+      ...base,
+      message: { message_id: 5, text: '5', date: NOW_SEC - 3600 },
+    });
+    await bot.deliver('edited_message', {
+      ...base,
+      editedMessage: { message_id: 6, text: '5', date: NOW_SEC - 3600 },
+    });
+
+    expect(handlers.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('zero switches the age check off', async () => {
+    const { bot } = setup(new Set(), 0);
+
+    await bot.deliver('chat_member', chatMember({ date: NOW_SEC - 86_400 }));
+
+    expect(handlers.onJoin).toHaveBeenCalled();
+  });
+
+  it('an update without a timestamp is treated as fresh', async () => {
+    const { bot } = setup(new Set(), 300);
 
     await bot.deliver('chat_member', chatMember());
 

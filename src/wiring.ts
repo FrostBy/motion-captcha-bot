@@ -12,6 +12,8 @@ export interface Wiring {
   allowedChatIds: ReadonlySet<number>;
   /** Shared queue for updates and the expiry sweeper. */
   gate: { run<T>(task: () => Promise<T>): Promise<T> };
+  /** Seconds an update may have waited before it is ignored; 0 disables it. */
+  maxUpdateAgeSec?: number;
   deps: Deps;
 }
 
@@ -20,9 +22,29 @@ function isGroup(type: string): boolean {
   return type === 'group' || type === 'supergroup';
 }
 
+/**
+ * When the update was created, in Telegram's seconds. Every update the bot
+ * subscribes to carries one; an unknown shape is treated as fresh so a future
+ * update type cannot be dropped silently.
+ */
+function updateAgeSec(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any,
+  now: number,
+): number {
+  const date: unknown =
+    ctx.chatMember?.date ??
+    ctx.editedMessage?.edit_date ??
+    ctx.editedMessage?.date ??
+    ctx.message?.date;
+  if (typeof date !== 'number') return 0;
+  return Math.max(0, Math.floor(now / 1000) - date);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerHandlers(bot: Bot<any>, wiring: Wiring): void {
   const { allowedChatIds, gate, deps } = wiring;
+  const maxAgeSec = wiring.maxUpdateAgeSec ?? 0;
 
   // An empty allowlist preserves the default of serving every chat. Filtering
   // here prevents disallowed chats from reaching rendering or mutable state.
@@ -31,6 +53,20 @@ export function registerHandlers(bot: Bot<any>, wiring: Wiring): void {
     if (chatId !== undefined && allowedChatIds.size > 0 && !allowedChatIds.has(chatId)) return;
     await next();
   });
+
+  // Telegram keeps undelivered updates for a day. Without this a bot that was
+  // down wakes up and works through the backlog: captchas for people who
+  // joined hours ago and answers to captchas nobody is waiting for.
+  if (maxAgeSec > 0) {
+    bot.use(async (ctx, next) => {
+      const age = updateAgeSec(ctx, deps.now?.() ?? Date.now());
+      if (age > maxAgeSec) {
+        deps.log(`Ignoring an update ${age}s old`, { chatId: ctx.chat?.id, maxAgeSec });
+        return;
+      }
+      await next();
+    });
+  }
 
   // Updates and the expiry sweeper share one queue: otherwise the sweeper
   // reads the deadline while a correct answer still waits to be handled.

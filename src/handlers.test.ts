@@ -93,6 +93,29 @@ describe('newcomer greeting', () => {
     expect(api.sendAnimation).not.toHaveBeenCalled();
   });
 
+  // A join that waited in the queue while the bot was down: by now an admin
+  // may well have banned the spammer by hand.
+  it('skips someone Telegram already reports as gone', async () => {
+    for (const status of ['kicked', 'left'] as const) {
+      const { deps, api } = setup();
+      api.getChatMember!.mockResolvedValueOnce({ status });
+
+      await onJoin(deps, CHAT, guest);
+
+      expect(api.sendAnimation).not.toHaveBeenCalled();
+      expect(deps.state.getPending(CHAT, 7)).toBeUndefined();
+    }
+  });
+
+  it('an unanswered status check still greets: an outage is not a way in', async () => {
+    const { deps, api } = setup();
+    api.getChatMember!.mockRejectedValue(new Error('Telegram unavailable'));
+
+    await onJoin(deps, CHAT, guest);
+
+    expect(api.sendAnimation).toHaveBeenCalledOnce();
+  });
+
   it('correct answer: welcome, cleanup, passed status', async () => {
     const { deps, api } = setup();
     await onJoin(deps, CHAT, guest);

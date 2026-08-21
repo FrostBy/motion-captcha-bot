@@ -26,6 +26,7 @@ On top of the base mechanics there are optional shields against automated video 
 - Every message from a pending newcomer except the correct answer is deleted.
 - Members seen before, and anyone who already passed, never get a captcha. `PASSED_TTL_DAYS` makes that memory expire; by default it lasts forever.
 - Allowlisted bots and bots added by an administrator stay; other bots are kicked.
+- Updates that waited in Telegram's queue longer than `MAX_UPDATE_AGE_SEC` (5 min by default) are ignored, and a newcomer Telegram already reports as banned or gone gets no captcha. Without both, a bot coming back from an outage works through a day of backlog and greets people who joined hours ago.
 - If captcha rendering fails, the newcomer is let through with a loud log line, so an outage does not lock people out. `CAPTCHA_FAIL_CLOSED=true` flips that: a broken renderer bans instead, and nobody slips past a captcha that was never sent.
 
 The bot works in groups and supergroups. A broadcast channel has no one to challenge — subscribers cannot answer in it — so adding the bot there does nothing.
@@ -64,6 +65,7 @@ Everything is configured through environment variables. No database, no admin pa
 | `CAPTCHA_BAN_SEC` | `300` | Seconds a newcomer remains banned after failing the captcha (`60..31536000`) |
 | `CAPTCHA_FAIL_CLOSED` | `false` | Ban the newcomer for `CAPTCHA_BAN_SEC` when the captcha cannot be rendered, instead of letting them in |
 | `PASSED_TTL_DAYS` | `0` | Days a passed user is remembered; `0` keeps them forever |
+| `MAX_UPDATE_AGE_SEC` | `300` | Seconds an update may have waited in Telegram's queue before it is ignored; `0` processes the whole backlog after an outage |
 | `CAPTCHA_OPERAND_DIGITS` | `1` | Digits per operand: `1` keeps the glyphs large and the sum instant, `2` widens the answer space from 19 to about 180 at the price of readability |
 | `ALLOWED_BOT_IDS` | unset | Comma-separated numeric bot IDs allowed regardless of who added them; other bots must be added by an administrator |
 | `ALLOWED_CHAT_IDS` | unset | Comma-separated numeric chat IDs served by the bot; unset or empty allows every chat |

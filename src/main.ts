@@ -61,7 +61,12 @@ const deps: Deps = {
 };
 
 const gate = createSerialGate();
-registerHandlers(bot, { allowedChatIds: config.allowedChatIds, gate, deps });
+registerHandlers(bot, {
+  allowedChatIds: config.allowedChatIds,
+  maxUpdateAgeSec: config.maxUpdateAgeSec,
+  gate,
+  deps,
+});
 
 const sweeper = setInterval(
   createSweeper({ gate, deps }, sweepExpired),

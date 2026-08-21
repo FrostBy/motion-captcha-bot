@@ -89,6 +89,21 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * Whether Telegram already considers the user gone. Fail-open on purpose: an
+ * API hiccup must not become a way past the captcha, so an unanswered check
+ * is treated as "still here".
+ */
+async function hasLeft(deps: Deps, chatId: number, userId: number): Promise<boolean> {
+  try {
+    const current = await withRetry(() => deps.api.getChatMember(chatId, userId));
+    return current.status === 'kicked' || current.status === 'left';
+  } catch (error) {
+    deps.log(`Could not read the newcomer status: ${errorText(error)}`, { chatId, userId });
+    return false;
+  }
+}
+
+/**
  * Kick without closing the door: the user may rejoin and try again. Marked
  * in state first, so the ban/unban updates it triggers are not mistaken for
  * proof of membership.
@@ -146,6 +161,17 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
   }
 
   if (state.isPassed(chatId, member.id)) return;
+
+  // The join may be stale news. While the bot was down an admin could have
+  // banned the spammer by hand, and a captcha for someone already gone is
+  // noise in the chat plus a pending entry nobody will ever clear.
+  if (await hasLeft(deps, chatId, member.id)) {
+    deps.log('Newcomer is no longer in the chat, skipping the captcha', {
+      chatId,
+      userId: member.id,
+    });
+    return;
+  }
 
   // A repeated join while still pending must not orphan the old captcha.
   const previous = state.getPending(chatId, member.id);
