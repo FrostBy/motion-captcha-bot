@@ -143,7 +143,7 @@ describe('markers survive a restart', () => {
     const revived = new State(good);
     revived.markPassed(-1, 7);
     await revived.flush();
-    expect(JSON.parse(readFileSync(good, 'utf8')).chats['-1'].passed).toEqual([7]);
+    expect(Object.keys(JSON.parse(readFileSync(good, 'utf8')).chats['-1'].passed)).toEqual(['7']);
   });
 
   it('a negative chat id survives the marker key round trip', () => {

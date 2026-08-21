@@ -126,3 +126,30 @@ describe('message templates', () => {
     expect(() => loadMessages(file)).toThrow();
   });
 });
+
+describe('failure policy and retention knobs', () => {
+  it('keeps the fail-open default and no retention window', () => {
+    const config = loadConfig({ BOT_TOKEN: '123:test' });
+
+    expect(config.captchaFailClosed).toBe(false);
+    expect(config.passedTtlDays).toBe(0);
+  });
+
+  it('accepts a retention window in days', () => {
+    const config = loadConfig({ BOT_TOKEN: '123:test', PASSED_TTL_DAYS: '90' });
+
+    expect(config.passedTtlDays).toBe(90);
+  });
+
+  it('rejects a retention window that is not a whole number of days', () => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', PASSED_TTL_DAYS: '7.5' })).toThrow(
+      'PASSED_TTL_DAYS',
+    );
+  });
+
+  it('turns the captcha into a closed door on request', () => {
+    const config = loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_FAIL_CLOSED: 'true' });
+
+    expect(config.captchaFailClosed).toBe(true);
+  });
+});

@@ -313,3 +313,38 @@ describe('bots', () => {
     expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('let through'), expect.anything());
   });
 });
+
+describe('failure policy and retention', () => {
+  it('a rendering failure bans instead of whitelisting when told to fail closed', async () => {
+    const { deps, api } = setup();
+    deps.captchaFailClosed = true;
+    const { renderAnimation } = await import('./captcha.js');
+    vi.mocked(renderAnimation).mockRejectedValueOnce(new Error('no ffmpeg'));
+
+    await onJoin(deps, CHAT, guest);
+
+    expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 7, expect.any(Number));
+  });
+
+  it('the sweep forgets veterans past the retention window', async () => {
+    const { deps } = setup();
+    deps.passedTtlDays = 30;
+    deps.state.markPassed(CHAT, 42, 1_000_000);
+
+    deps.now = () => 1_000_000 + 31 * 24 * 60 * 60 * 1000;
+    await sweepExpired(deps);
+
+    expect(deps.state.isPassed(CHAT, 42)).toBe(false);
+  });
+
+  it('without a retention window veterans stay forever', async () => {
+    const { deps } = setup();
+    deps.state.markPassed(CHAT, 42, 1_000_000);
+
+    deps.now = () => 1_000_000 + 3650 * 24 * 60 * 60 * 1000;
+    await sweepExpired(deps);
+
+    expect(deps.state.isPassed(CHAT, 42)).toBe(true);
+  });
+});

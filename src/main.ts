@@ -57,6 +57,8 @@ const deps: Deps = {
   captchaDecoy: config.captchaDecoy,
   captchaMaxAttempts: config.captchaMaxAttempts,
   captchaBanSec: config.captchaBanSec,
+  captchaFailClosed: config.captchaFailClosed,
+  passedTtlDays: config.passedTtlDays,
   allowedBotIds: config.allowedBotIds,
   allowedChatIds: config.allowedChatIds,
   messages: loadMessages(config.messagesFile),

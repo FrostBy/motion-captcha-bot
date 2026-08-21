@@ -40,6 +40,10 @@ export interface Deps {
   captchaDecoy: boolean;
   captchaMaxAttempts: number;
   captchaBanSec: number;
+  /** A rendering failure bans instead of waving the newcomer through. */
+  captchaFailClosed?: boolean;
+  /** Days a veteran is remembered; 0 or undefined keeps them forever. */
+  passedTtlDays?: number;
   allowedBotIds: ReadonlySet<number>;
   /** Chats served by the bot; empty means every chat, as in the config. */
   allowedChatIds?: ReadonlySet<number>;
@@ -150,9 +154,21 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
       random: deps.random,
     });
   } catch (error) {
+    if (deps.captchaFailClosed) {
+      // A broken renderer must not become the way past the captcha: the
+      // newcomer waits out the usual ban and tries again later.
+      deps.log(`Captcha render failed, banning temporarily: ${errorText(error)}`, {
+        chatId,
+        userId: member.id,
+      });
+      await banFailedNewcomer(deps, chatId, member.id).catch((banError) =>
+        deps.log(`Ban failed: ${errorText(banError)}`, { chatId, userId: member.id }),
+      );
+      return;
+    }
     // Keeping someone pending with no captcha is unfair, let them in loudly.
     deps.log(`Captcha render failed, newcomer let through: ${errorText(error)}`, { chatId });
-    state.markPassed(chatId, member.id);
+    state.markPassed(chatId, member.id, deps.now?.() ?? Date.now());
     return;
   }
 
@@ -207,14 +223,14 @@ export function onSeenInside(
   }
   // Leaving a ban behind (kicked -> left) is not membership.
   if (event?.previousStatus !== undefined && !MEMBER_STATUSES.has(event.previousStatus)) return;
-  deps.state.markPassed(chatId, userId);
+  deps.state.markPassed(chatId, userId, deps.now?.() ?? Date.now());
 }
 
 /** A pending user promoted to admin is obviously trusted: waive the captcha. */
 export function onPromoted(deps: Deps, chatId: number, userId: number): void {
   const pending = deps.state.getPending(chatId, userId);
   if (pending) void quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
-  deps.state.markPassed(chatId, userId);
+  deps.state.markPassed(chatId, userId, deps.now?.() ?? Date.now());
 }
 
 export async function onMessage(
@@ -235,7 +251,7 @@ export async function onMessage(
       return;
     }
     // They write, so they are inside; not pending, so they predate the bot.
-    state.markPassed(chatId, userId);
+    state.markPassed(chatId, userId, now);
     return;
   }
 
@@ -254,7 +270,7 @@ export async function onMessage(
   }
 
   if (answer === String(pending.answer)) {
-    state.markPassed(chatId, userId);
+    state.markPassed(chatId, userId, now);
     await quietly(() => api.deleteMessage(chatId, messageId));
     await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
     const hello = await withRetry(() =>
@@ -295,6 +311,12 @@ export async function sweepExpired(deps: Deps): Promise<void> {
     deps.allowedChatIds === undefined ||
     deps.allowedChatIds.size === 0 ||
     deps.allowedChatIds.has(chatId);
+
+  // Veterans are the only part of the snapshot that never shrinks on its own.
+  if (deps.passedTtlDays) {
+    const removed = deps.state.prunePassed(now - deps.passedTtlDays * 24 * 60 * 60 * 1000);
+    if (removed > 0) deps.log('Forgot veterans past the retention window', { removed });
+  }
 
   for (const { chatId, userId, until } of deps.state.expiredTemporaryBans(now)) {
     if (!served(chatId)) continue;

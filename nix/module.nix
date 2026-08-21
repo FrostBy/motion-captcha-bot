@@ -32,6 +32,28 @@ in
       default = { };
       description = "Additional environment variables for the bot.";
     };
+
+    resources = {
+      cpuQuota = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = "100%";
+        example = "50%";
+        description = "CPUQuota for the unit; null leaves the CPU unbounded.";
+      };
+
+      memoryMax = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = "512M";
+        example = "1G";
+        description = "MemoryMax for the unit; null leaves memory unbounded.";
+      };
+
+      tasksMax = lib.mkOption {
+        type = lib.types.nullOr lib.types.int;
+        default = 256;
+        description = "TasksMax for the unit; null leaves the process count unbounded.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -60,6 +82,17 @@ in
       }
       // lib.optionalAttrs (cfg.environmentFile != null) {
         EnvironmentFile = cfg.environmentFile;
+      }
+      # Ceilings so a captcha flood stays inside this unit: rendering is a
+      # short ffmpeg burst, the bot itself needs little memory.
+      // lib.optionalAttrs (cfg.resources.cpuQuota != null) {
+        CPUQuota = cfg.resources.cpuQuota;
+      }
+      // lib.optionalAttrs (cfg.resources.memoryMax != null) {
+        MemoryMax = cfg.resources.memoryMax;
+      }
+      // lib.optionalAttrs (cfg.resources.tasksMax != null) {
+        TasksMax = cfg.resources.tasksMax;
       };
     };
   };
