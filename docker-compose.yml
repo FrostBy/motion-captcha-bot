@@ -17,6 +17,10 @@ services:
       - CAPTCHA_MAX_ATTEMPTS=${CAPTCHA_MAX_ATTEMPTS:-3}
       # Seconds a failed newcomer remains banned (60..31536000).
       - CAPTCHA_BAN_SEC=${CAPTCHA_BAN_SEC:-300}
+      # Ban instead of letting the newcomer in when rendering fails.
+      - CAPTCHA_FAIL_CLOSED=${CAPTCHA_FAIL_CLOSED:-false}
+      # Days a passed user is remembered; 0 keeps them forever.
+      - PASSED_TTL_DAYS=${PASSED_TTL_DAYS:-0}
       # Bots allowed regardless of who added them (comma-separated numeric IDs).
       - ALLOWED_BOT_IDS=${ALLOWED_BOT_IDS:-}
       # Chats served by the bot; empty allows all (comma-separated numeric IDs).
@@ -27,3 +31,8 @@ services:
       - FFMPEG_PATH=${FFMPEG_PATH:-ffmpeg}
     volumes:
       - ./data:/app/data
+    # Ceilings so a captcha flood cannot squeeze the rest of the host: each
+    # render is a short ffmpeg burst, and the bot itself needs little memory.
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 256

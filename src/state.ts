@@ -26,7 +26,11 @@ export interface Pending {
 const KICK_MARKER_TTL_MS = 60_000;
 
 interface ChatState {
-  passed: number[];
+  /**
+   * Veterans with the moment they were remembered. The legacy array form is
+   * still read: those entries start their retention at load time.
+   */
+  passed: number[] | Record<string, number>;
   pending: Record<string, Pending>;
 }
 
@@ -42,7 +46,7 @@ interface Snapshot {
  * are explicitly flushed before the matching Telegram moderation call.
  */
 export class State {
-  private chats = new Map<number, { passed: Set<number>; pending: Map<number, Pending> }>();
+  private chats = new Map<number, { passed: Map<number, number>; pending: Map<number, Pending> }>();
   /** In-flight/recent kicks by "chatId:userId", value is the marker expiry. */
   private kicks = new Map<string, number>();
   /** Captcha bans by "chatId:userId", value is the scheduled unban time. */
@@ -68,10 +72,19 @@ export class State {
       const snapshot = JSON.parse(raw) as Snapshot;
       // Build aside and assign at the end: a malformed chat in the middle
       // must not leave the state half-populated.
-      const chats = new Map<number, { passed: Set<number>; pending: Map<number, Pending> }>();
+      const chats = new Map<number, { passed: Map<number, number>; pending: Map<number, Pending> }>();
+      const now = Date.now();
       for (const [chatId, chat] of Object.entries(snapshot.chats ?? {})) {
+        const passed = new Map<number, number>();
+        if (Array.isArray(chat.passed)) {
+          for (const userId of chat.passed) passed.set(Number(userId), now);
+        } else {
+          for (const [userId, at] of Object.entries(chat.passed ?? {})) {
+            passed.set(Number(userId), Number(at));
+          }
+        }
         chats.set(Number(chatId), {
-          passed: new Set(chat.passed ?? []),
+          passed,
           pending: new Map(
             Object.entries(chat.pending ?? {}).map(([userId, p]) => [Number(userId), p]),
           ),
@@ -112,7 +125,7 @@ export class State {
     };
     for (const [chatId, chat] of this.chats) {
       snapshot.chats[chatId] = {
-        passed: [...chat.passed],
+        passed: Object.fromEntries(chat.passed),
         pending: Object.fromEntries(chat.pending),
       };
     }
@@ -130,7 +143,7 @@ export class State {
   private chat(chatId: number) {
     let chat = this.chats.get(chatId);
     if (!chat) {
-      chat = { passed: new Set(), pending: new Map() };
+      chat = { passed: new Map(), pending: new Map() };
       this.chats.set(chatId, chat);
     }
     return chat;
@@ -140,13 +153,30 @@ export class State {
     return this.chats.get(chatId)?.passed.has(userId) ?? false;
   }
 
-  markPassed(chatId: number, userId: number): void {
+  markPassed(chatId: number, userId: number, now: number = Date.now()): void {
     const chat = this.chat(chatId);
     chat.pending.delete(userId);
     if (!chat.passed.has(userId)) {
-      chat.passed.add(userId);
+      chat.passed.set(userId, now);
       this.dirty = true;
     }
+  }
+
+  /**
+   * Forget veterans older than the retention window. Without it the snapshot
+   * only grows, and every dirty flush rewrites the whole of it.
+   */
+  prunePassed(olderThan: number): number {
+    let removed = 0;
+    for (const chat of this.chats.values()) {
+      for (const [userId, at] of chat.passed) {
+        if (at > olderThan) continue;
+        chat.passed.delete(userId);
+        removed++;
+      }
+    }
+    if (removed > 0) this.dirty = true;
+    return removed;
   }
 
   getPending(chatId: number, userId: number): Pending | undefined {

@@ -125,3 +125,47 @@ describe('decoy', () => {
     expect(outside - inside).toBeGreaterThan(4);
   });
 });
+
+describe('sprinkle and decoy layers', () => {
+  it('sprinkle repaints part of the frame without leaking the answer', () => {
+    const plain = renderFrames('4+2', { style: 'l', random: seededRandom(7) });
+    const sprinkled = renderFrames('4+2', { style: 'l', sprinkle: 0.05, random: seededRandom(7) });
+
+    let changed = 0;
+    for (let i = 0; i < plain.frames[0]!.length; i++) {
+      if (plain.frames[0]![i] !== sprinkled.frames[0]![i]) changed++;
+    }
+    // Заметная доля пикселей пересыпана, но кадр по-прежнему ровный шум.
+    expect(changed).toBeGreaterThan(0);
+    const inside = meanBy(sprinkled.frames[0]!, sprinkled.mask, true);
+    const outside = meanBy(sprinkled.frames[0]!, sprinkled.mask, false);
+    expect(Math.abs(inside - outside)).toBeLessThan(255 * 0.04);
+  });
+
+  it('the decoy is invisible per frame yet surfaces in the average', () => {
+    const { frames } = renderFrames('4+2', {
+      style: 'l',
+      decoyQuestion: '9+9',
+      random: seededRandom(11),
+    });
+    const decoyMask = buildMask('9+9');
+
+    const single = Math.abs(
+      meanBy(frames[0]!, decoyMask, true) - meanBy(frames[0]!, decoyMask, false),
+    );
+    const acc = new Float64Array(WIDTH * HEIGHT);
+    for (const frame of frames) for (let i = 0; i < acc.length; i++) acc[i] = acc[i]! + frame[i]!;
+    const averaged = Uint8Array.from(acc, (v) => v / frames.length);
+    const mean = meanBy(averaged, decoyMask, false) - meanBy(averaged, decoyMask, true);
+
+    expect(single).toBeLessThan(255 * 0.06);
+    expect(mean).toBeGreaterThan(4);
+  });
+
+  it('the same seed renders the same animation twice', () => {
+    const first = renderFrames('7+5', { style: 'dots', random: seededRandom(3) });
+    const second = renderFrames('7+5', { style: 'dots', random: seededRandom(3) });
+
+    expect(Buffer.from(first.frames[0]!)).toEqual(Buffer.from(second.frames[0]!));
+  });
+});

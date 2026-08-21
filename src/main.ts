@@ -2,6 +2,7 @@ import { Bot, InputFile } from 'grammy';
 
 import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
+import { createSerialGate } from './gate.js';
 import {
   onJoin,
   onMessage,
@@ -56,7 +57,10 @@ const deps: Deps = {
   captchaDecoy: config.captchaDecoy,
   captchaMaxAttempts: config.captchaMaxAttempts,
   captchaBanSec: config.captchaBanSec,
+  captchaFailClosed: config.captchaFailClosed,
+  passedTtlDays: config.passedTtlDays,
   allowedBotIds: config.allowedBotIds,
+  allowedChatIds: config.allowedChatIds,
   messages: loadMessages(config.messagesFile),
   log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
@@ -71,6 +75,11 @@ bot.use(async (ctx, next) => {
   }
   await next();
 });
+
+// Updates and the expiry sweeper share one queue: otherwise the sweeper reads
+// the deadline while a correct answer is still waiting to be handled.
+const gate = createSerialGate();
+bot.use((_ctx, next) => gate.run(next));
 
 // Joins and leaves: chat_member arrives only when explicitly polled for.
 bot.on('chat_member', async (ctx) => {
@@ -93,7 +102,9 @@ bot.on('chat_member', async (ctx) => {
     });
     return;
   }
-  if (left && !user.is_bot) onSeenInside(deps, chatId, user.id);
+  if (left && !user.is_bot) {
+    onSeenInside(deps, chatId, user.id, { actorId: update.from.id, previousStatus: was });
+  }
   // An admin stuck behind a pending captcha would be moderated forever.
   if (promoted && !user.is_bot) onPromoted(deps, chatId, user.id);
 });
@@ -114,7 +125,19 @@ bot.on('edited_message', async (ctx) => {
 bot.catch((error) => deps.log(`Update handling failed: ${error.message}`));
 
 const SWEEP_INTERVAL_MS = 5000;
-const sweeper = setInterval(() => void sweepExpired(deps), SWEEP_INTERVAL_MS);
+// A pass that outlives its interval must not start a second one: bans and
+// rate-limit waits would stack up on the same users.
+let sweeping = false;
+const sweeper = setInterval(() => {
+  if (sweeping) return;
+  sweeping = true;
+  void gate
+    .run(() => sweepExpired(deps))
+    .catch((error: Error) => deps.log(`Sweep failed: ${error.message}`))
+    .finally(() => {
+      sweeping = false;
+    });
+}, SWEEP_INTERVAL_MS);
 
 async function shutdown(): Promise<void> {
   clearInterval(sweeper);
@@ -131,5 +154,9 @@ process.on('SIGINT', () => void shutdown());
 void bot.start({
   // Telegram omits chat_member unless explicitly listed, no joins otherwise.
   allowed_updates: ['chat_member', 'message', 'edited_message'],
-  onStart: (me) => deps.log(`Started @${me.username}`),
+  onStart: (me) => {
+    // Own id: moderation this bot performs must not read as user activity.
+    deps.botId = me.id;
+    deps.log(`Started @${me.username}`);
+  },
 });

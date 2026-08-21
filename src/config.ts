@@ -19,6 +19,14 @@ export interface Config {
   captchaMaxAttempts: number;
   /** Seconds a failed newcomer remains banned. */
   captchaBanSec: number;
+  /**
+   * What a rendering failure means: false lets the newcomer in (the default,
+   * an outage should not lock people out), true bans them for `captchaBanSec`
+   * so a broken renderer cannot become a way past the captcha.
+   */
+  captchaFailClosed: boolean;
+  /** Days a passed user is remembered; 0 keeps them forever. */
+  passedTtlDays: number;
   /** Bots allowed regardless of who added them. */
   allowedBotIds: ReadonlySet<number>;
   /** Chats served by the bot; an empty set allows every chat. */
@@ -106,6 +114,18 @@ function parseCaptchaBanSec(value: string | undefined): number {
   return seconds;
 }
 
+function parsePassedTtlDays(value: string | undefined): number {
+  if (value === undefined || value === '') return 0;
+  if (!/^\d+$/.test(value)) {
+    throw new Error('PASSED_TTL_DAYS must be a non-negative integer');
+  }
+  const days = Number(value);
+  if (!Number.isSafeInteger(days)) {
+    throw new Error('PASSED_TTL_DAYS must be a non-negative integer');
+  }
+  return days;
+}
+
 /** Missing file means defaults; a broken one is a loud config error. */
 export function loadMessages(file: string): Messages {
   let raw: string;
@@ -150,6 +170,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captchaMaxAttempts:
       Number(env.CAPTCHA_MAX_ATTEMPTS) > 0 ? Math.floor(Number(env.CAPTCHA_MAX_ATTEMPTS)) : 3,
     captchaBanSec: parseCaptchaBanSec(env.CAPTCHA_BAN_SEC),
+    captchaFailClosed: env.CAPTCHA_FAIL_CLOSED === 'true',
+    passedTtlDays: parsePassedTtlDays(env.PASSED_TTL_DAYS),
     allowedBotIds: parseAllowedBotIds(env.ALLOWED_BOT_IDS),
     allowedChatIds: parseAllowedChatIds(env.ALLOWED_CHAT_IDS),
     dataFile: env.DATA_FILE ?? 'data/state.json',
