@@ -24,9 +24,11 @@ On top of the base mechanics there are optional shields against automated video 
 
 - A newcomer must reply with the correct number within the timeout (60 s by default); failure means a temporary ban (5 min by default), after which rejoining is allowed.
 - Every message from a pending newcomer except the correct answer is deleted.
-- Members seen before, and anyone who already passed, never get a captcha.
+- Members seen before, and anyone who already passed, never get a captcha. `PASSED_TTL_DAYS` makes that memory expire; by default it lasts forever.
 - Allowlisted bots and bots added by an administrator stay; other bots are kicked.
-- If captcha rendering fails, the newcomer is let through with a loud log line, so nobody gets trapped by an infrastructure problem.
+- If captcha rendering fails, the newcomer is let through with a loud log line, so an outage does not lock people out. `CAPTCHA_FAIL_CLOSED=true` flips that: a broken renderer bans instead, and nobody slips past a captcha that was never sent.
+
+The bot works in groups and supergroups. A broadcast channel has no one to challenge — subscribers cannot answer in it — so adding the bot there does nothing.
 
 State is a JSON snapshot on disk: held in memory, flushed atomically every few seconds and on shutdown. Restarts lose nothing that matters.
 
