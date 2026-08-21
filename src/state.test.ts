@@ -106,3 +106,52 @@ describe('state snapshot', () => {
     expect(state.hasTemporaryBan(-1, 2)).toBe(true);
   });
 });
+
+describe('markers survive a restart', () => {
+  it('kick and temporary-ban markers come back from the snapshot', async () => {
+    const file = tempFile();
+    const state = new State(file);
+    state.markKicking(-1, 7, 1_000, 60_000);
+    state.markTemporarilyBanned(-1, 8, 500_000);
+    await state.flush();
+
+    const revived = new State(file);
+    revived.load();
+
+    expect(revived.isKicking(-1, 7, 1_000)).toBe(true);
+    expect(revived.getTemporaryBan(-1, 8)).toBe(500_000);
+  });
+
+  it('an expired kick marker is dropped on the first check', () => {
+    const state = new State(tempFile());
+    state.markKicking(-1, 7, 1_000, 60_000);
+
+    expect(state.isKicking(-1, 7, 100_000)).toBe(false);
+    expect(state.isKicking(-1, 7, 1_000)).toBe(false);
+  });
+
+  it('a write failure keeps the state dirty for the next attempt', async () => {
+    // Каталога нет и создать его нельзя: путь занят файлом.
+    const blocked = tempFile();
+    writeFileSync(blocked, 'not a directory');
+    const state = new State(join(blocked, 'state.json'));
+    state.markPassed(-1, 7);
+
+    await expect(state.flush()).rejects.toThrow();
+
+    const good = tempFile();
+    const revived = new State(good);
+    revived.markPassed(-1, 7);
+    await revived.flush();
+    expect(JSON.parse(readFileSync(good, 'utf8')).chats['-1'].passed).toEqual([7]);
+  });
+
+  it('a negative chat id survives the marker key round trip', () => {
+    const state = new State(tempFile());
+    state.markTemporarilyBanned(-1_003_865_200_762, 42, 900);
+
+    expect(state.expiredTemporaryBans(1_000)).toEqual([
+      { chatId: -1_003_865_200_762, userId: 42, until: 900 },
+    ]);
+  });
+});

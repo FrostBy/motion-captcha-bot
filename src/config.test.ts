@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { loadConfig } from './config.js';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { DEFAULT_MESSAGES, loadConfig, loadMessages } from './config.js';
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('loadConfig', () => {
   it('leaves the Telegram API root unset by default', () => {
@@ -86,5 +95,34 @@ describe('loadConfig', () => {
         CAPTCHA_TEST_SEED: '-1',
       }),
     ).toThrow('CAPTCHA_TEST_SEED must be an unsigned 32-bit integer');
+  });
+});
+
+describe('message templates', () => {
+  it('falls back to the defaults when the file is missing', () => {
+    expect(loadMessages(join(tmpdir(), 'motion-captcha-no-such-file.json'))).toEqual(
+      DEFAULT_MESSAGES,
+    );
+  });
+
+  it('takes only the string fields, keeping defaults for the rest', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'motion-captcha-messages-'));
+    dirs.push(dir);
+    const file = join(dir, 'messages.json');
+    writeFileSync(file, JSON.stringify({ captcha: 'Solve %timer%', welcome: 42 }));
+
+    expect(loadMessages(file)).toEqual({
+      captcha: 'Solve %timer%',
+      welcome: DEFAULT_MESSAGES.welcome,
+    });
+  });
+
+  it('a broken file is a loud config error, not a silent default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'motion-captcha-messages-'));
+    dirs.push(dir);
+    const file = join(dir, 'messages.json');
+    writeFileSync(file, '{oops');
+
+    expect(() => loadMessages(file)).toThrow();
   });
 });

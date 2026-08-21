@@ -41,6 +41,10 @@ export interface Deps {
   captchaMaxAttempts: number;
   captchaBanSec: number;
   allowedBotIds: ReadonlySet<number>;
+  /** Chats served by the bot; empty means every chat, as in the config. */
+  allowedChatIds?: ReadonlySet<number>;
+  /** Own id: updates this bot itself caused are not evidence about a user. */
+  botId?: number;
   messages: Messages;
   log: (message: string, extra?: unknown) => void;
   now?: () => number;
@@ -94,7 +98,11 @@ async function banFailedNewcomer(deps: Deps, chatId: number, userId: number): Pr
   );
   deps.state.markTemporarilyBanned(chatId, userId, untilDate * 1000);
   // Persist the marker before Telegram can emit the matching status updates.
-  await deps.state.flush();
+  // A failed write must not cancel the ban itself: the snapshot is a
+  // convenience, letting the spammer stay is not.
+  await deps.state.flush().catch((error) =>
+    deps.log(`State snapshot before the ban failed: ${errorText(error)}`, { chatId, userId }),
+  );
   await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate));
 }
 
@@ -164,9 +172,29 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
   });
 }
 
-/** A leave/status change proves the user was inside, a veteran. */
-export function onSeenInside(deps: Deps, chatId: number, userId: number): void {
-  // Updates caused by our own ban/unban are not proof of membership.
+/** Statuses that prove the user really was inside the chat. */
+const MEMBER_STATUSES: ReadonlySet<ChatMemberStatus> = new Set([
+  'member',
+  'restricted',
+  'administrator',
+  'creator',
+]);
+
+/**
+ * A leave event proves membership only when the previous status was a real
+ * one and the change was not our own moderation. Timers alone were not
+ * enough: after downtime longer than the ban, the automatic-unban update
+ * (kicked -> left) arrived with every marker expired and promoted a failed
+ * newcomer to veteran, so the captcha never showed up for them again.
+ */
+export function onSeenInside(
+  deps: Deps,
+  chatId: number,
+  userId: number,
+  event?: { actorId?: number; previousStatus?: ChatMemberStatus },
+): void {
+  // Our own ban and the unban that follows it say nothing about the user.
+  if (event?.actorId !== undefined && event.actorId === deps.botId) return;
   if (deps.state.hasTemporaryBan(chatId, userId)) return;
   if (deps.state.isKicking(chatId, userId, deps.now?.() ?? Date.now())) return;
 
@@ -177,6 +205,8 @@ export function onSeenInside(deps: Deps, chatId: number, userId: number): void {
     void quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
     return;
   }
+  // Leaving a ban behind (kicked -> left) is not membership.
+  if (event?.previousStatus !== undefined && !MEMBER_STATUSES.has(event.previousStatus)) return;
   deps.state.markPassed(chatId, userId);
 }
 
@@ -259,7 +289,15 @@ export async function onMessage(
 /** Timer sweep: expired newcomers get temporarily banned, restart survivors included. */
 export async function sweepExpired(deps: Deps): Promise<void> {
   const now = deps.now?.() ?? Date.now();
+  // Updates from unserved chats never reach the handlers; entries left over
+  // from an earlier allowlist must not be moderated behind their backs.
+  const served = (chatId: number): boolean =>
+    deps.allowedChatIds === undefined ||
+    deps.allowedChatIds.size === 0 ||
+    deps.allowedChatIds.has(chatId);
+
   for (const { chatId, userId, until } of deps.state.expiredTemporaryBans(now)) {
+    if (!served(chatId)) continue;
     if (deps.state.getTemporaryBan(chatId, userId) !== until) continue;
     try {
       await withRetry(() => deps.api.unbanChatMember(chatId, userId, true));
@@ -269,6 +307,7 @@ export async function sweepExpired(deps: Deps): Promise<void> {
     }
   }
   for (const { chatId, userId, pending } of deps.state.expired(now)) {
+    if (!served(chatId)) continue;
     // The batch is a snapshot: while earlier kicks were in flight this user
     // may have answered correctly (or left). Re-check before acting.
     const current = deps.state.getPending(chatId, userId);

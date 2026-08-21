@@ -8,6 +8,7 @@ import { DEFAULT_MESSAGES } from './config.js';
 import {
   onJoin,
   onMessage,
+  onPromoted,
   onSeenInside,
   sweepExpired,
   type ChatMemberStatus,
@@ -50,6 +51,7 @@ function setup(now = 1_000_000): { deps: Deps; api: Record<string, ReturnType<ty
     captchaMaxAttempts: 3,
     captchaBanSec: 300,
     allowedBotIds: new Set(),
+    botId: 1,
     messages: DEFAULT_MESSAGES,
     log: vi.fn(),
     now: () => now,
@@ -175,7 +177,42 @@ describe('newcomer greeting', () => {
   it('a veteran leaving is marked as passed', () => {
     const { deps } = setup();
 
-    onSeenInside(deps, CHAT, 42);
+    onSeenInside(deps, CHAT, 42, { actorId: 42, previousStatus: 'member' });
+
+    expect(deps.state.isPassed(CHAT, 42)).toBe(true);
+  });
+
+  it('a ban lifted long after the bot went down does not create a veteran', async () => {
+    const { deps } = setup();
+    await onJoin(deps, CHAT, guest);
+
+    // The captcha deadline passes and the newcomer is banned for a while.
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+    expect(deps.state.hasTemporaryBan(CHAT, 7)).toBe(true);
+
+    // The bot is down longer than the ban plus every marker grace period.
+    deps.now = () => 1_000_000 + 61_000 + 300_000 + 61_000 + 10_000;
+    await sweepExpired(deps);
+
+    // Telegram delivers the queued automatic unban: kicked -> left, by us.
+    onSeenInside(deps, CHAT, 7, { actorId: 1, previousStatus: 'kicked' });
+
+    expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+  });
+
+  it('an unban by an admin is not proof of membership either', () => {
+    const { deps } = setup();
+
+    onSeenInside(deps, CHAT, 42, { actorId: 500, previousStatus: 'kicked' });
+
+    expect(deps.state.isPassed(CHAT, 42)).toBe(false);
+  });
+
+  it('a member kicked by an admin stays a veteran', () => {
+    const { deps } = setup();
+
+    onSeenInside(deps, CHAT, 42, { actorId: 500, previousStatus: 'member' });
 
     expect(deps.state.isPassed(CHAT, 42)).toBe(true);
   });
@@ -221,6 +258,47 @@ describe('bots', () => {
       expect.stringContaining('Could not verify bot adder'),
       expect.anything(),
     );
+  });
+
+  it('a failed snapshot write does not cancel the ban', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    // Read-only volume, full disk: the ban matters more than the snapshot.
+    vi.spyOn(deps.state, 'flush').mockRejectedValue(new Error('disk is full'));
+
+    for (const messageId of [555, 556, 557]) {
+      await onMessage(deps, CHAT, 7, messageId, '11');
+    }
+
+    expect(api.banChatMember).toHaveBeenCalledWith(CHAT, 7, expect.any(Number));
+    expect(deps.log).toHaveBeenCalledWith(
+      expect.stringContaining('snapshot'),
+      expect.anything(),
+    );
+  });
+
+  it('the sweep leaves chats outside the allowlist alone', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    // The chat was dropped from the allowlist while the captcha was pending.
+    deps.allowedChatIds = new Set([-100999]);
+
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+
+    expect(api.banChatMember).not.toHaveBeenCalled();
+    expect(deps.state.getPending(CHAT, 7)).toBeDefined();
+  });
+
+  it('a promoted pending user keeps no captcha behind', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+
+    onPromoted(deps, CHAT, 7);
+
+    expect(deps.state.isPassed(CHAT, 7)).toBe(true);
+    expect(deps.state.getPending(CHAT, 7)).toBeUndefined();
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 100);
   });
 
   it('ffmpeg failure lets the newcomer through loudly instead of trapping them', async () => {
