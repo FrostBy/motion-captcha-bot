@@ -3,16 +3,9 @@ import { Bot, InputFile } from 'grammy';
 import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import { createSerialGate } from './gate.js';
-import {
-  onJoin,
-  onMessage,
-  onPromoted,
-  onSeenInside,
-  sweepExpired,
-  type ChatApi,
-  type Deps,
-} from './handlers.js';
+import { sweepExpired, type ChatApi, type Deps } from './handlers.js';
 import { State } from './state.js';
+import { createSweeper, registerHandlers, SWEEP_INTERVAL_MS } from './wiring.js';
 
 const config = loadConfig();
 const state = new State(config.dataFile);
@@ -59,6 +52,7 @@ const deps: Deps = {
   captchaBanSec: config.captchaBanSec,
   captchaFailClosed: config.captchaFailClosed,
   passedTtlDays: config.passedTtlDays,
+  captchaOperandDigits: config.captchaOperandDigits,
   allowedBotIds: config.allowedBotIds,
   allowedChatIds: config.allowedChatIds,
   messages: loadMessages(config.messagesFile),
@@ -66,78 +60,13 @@ const deps: Deps = {
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
 
-// An empty allowlist preserves the default of serving every chat. Filtering
-// here prevents disallowed chats from reaching rendering or mutable state.
-bot.use(async (ctx, next) => {
-  const chatId = ctx.chat?.id;
-  if (chatId !== undefined && config.allowedChatIds.size > 0 && !config.allowedChatIds.has(chatId)) {
-    return;
-  }
-  await next();
-});
-
-// Updates and the expiry sweeper share one queue: otherwise the sweeper reads
-// the deadline while a correct answer is still waiting to be handled.
 const gate = createSerialGate();
-bot.use((_ctx, next) => gate.run(next));
+registerHandlers(bot, { allowedChatIds: config.allowedChatIds, gate, deps });
 
-// Joins and leaves: chat_member arrives only when explicitly polled for.
-bot.on('chat_member', async (ctx) => {
-  const update = ctx.chatMember;
-  const chatId = ctx.chat.id;
-  const user = update.new_chat_member.user;
-  const was = update.old_chat_member.status;
-  const is = update.new_chat_member.status;
-
-  const joined = (was === 'left' || was === 'kicked') && (is === 'member' || is === 'restricted');
-  const left = is === 'left' || is === 'kicked';
-  const promoted = is === 'administrator' || is === 'creator';
-
-  if (joined) {
-    await onJoin(deps, chatId, {
-      id: user.id,
-      isBot: user.is_bot,
-      firstName: user.first_name,
-      addedBy: update.from.id,
-    });
-    return;
-  }
-  if (left && !user.is_bot) {
-    onSeenInside(deps, chatId, user.id, { actorId: update.from.id, previousStatus: was });
-  }
-  // An admin stuck behind a pending captcha would be moderated forever.
-  if (promoted && !user.is_bot) onPromoted(deps, chatId, user.id);
-});
-
-bot.on('message', async (ctx) => {
-  if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return;
-  if (ctx.from.is_bot) return;
-  await onMessage(deps, ctx.chat.id, ctx.from.id, ctx.message.message_id, ctx.message.text);
-});
-
-// A newcomer fixing a typo by editing deserves the same evaluation.
-bot.on('edited_message', async (ctx) => {
-  if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return;
-  if (ctx.from.is_bot) return;
-  await onMessage(deps, ctx.chat.id, ctx.from.id, ctx.editedMessage.message_id, ctx.editedMessage.text);
-});
-
-bot.catch((error) => deps.log(`Update handling failed: ${error.message}`));
-
-const SWEEP_INTERVAL_MS = 5000;
-// A pass that outlives its interval must not start a second one: bans and
-// rate-limit waits would stack up on the same users.
-let sweeping = false;
-const sweeper = setInterval(() => {
-  if (sweeping) return;
-  sweeping = true;
-  void gate
-    .run(() => sweepExpired(deps))
-    .catch((error: Error) => deps.log(`Sweep failed: ${error.message}`))
-    .finally(() => {
-      sweeping = false;
-    });
-}, SWEEP_INTERVAL_MS);
+const sweeper = setInterval(
+  createSweeper({ gate, deps }, sweepExpired),
+  SWEEP_INTERVAL_MS,
+);
 
 async function shutdown(): Promise<void> {
   clearInterval(sweeper);

@@ -155,3 +155,55 @@ describe('markers survive a restart', () => {
     ]);
   });
 });
+
+describe('flusher lifecycle', () => {
+  it('the interval writes a dirty snapshot on its own', async () => {
+    const file = tempFile();
+    const state = new State(file, 10);
+    state.startFlusher();
+    state.markPassed(-1, 7);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await state.stop();
+
+    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')).chats['-1'].passed)).toEqual(['7']);
+  });
+
+  it('stop() writes what the last interval missed and stops the timer', async () => {
+    const file = tempFile();
+    const state = new State(file, 60_000);
+    state.startFlusher();
+    state.markPassed(-1, 7);
+
+    await state.stop();
+
+    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')).chats['-1'].passed)).toEqual(['7']);
+  });
+
+  it('overlapping flushes settle in order and share the queue after a failure', async () => {
+    const blocked = tempFile();
+    writeFileSync(blocked, 'not a directory');
+    const state = new State(join(blocked, 'state.json'));
+    state.markPassed(-1, 7);
+
+    const [first, second] = await Promise.allSettled([state.flush(), state.flush()]);
+
+    expect(first.status).toBe('rejected');
+    // The queue survives: the second caller is not left hanging.
+    expect(second.status).toBe('fulfilled');
+  });
+
+  it('a legacy snapshot with a passed array still loads', () => {
+    const file = tempFile();
+    writeFileSync(
+      file,
+      JSON.stringify({ chats: { '-1': { passed: [7, 8], pending: {} } } }),
+    );
+    const state = new State(file);
+
+    state.load();
+
+    expect(state.isPassed(-1, 7)).toBe(true);
+    expect(state.isPassed(-1, 8)).toBe(true);
+  });
+});

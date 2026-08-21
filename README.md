@@ -62,6 +62,7 @@ Everything is configured through environment variables. No database, no admin pa
 | `CAPTCHA_BAN_SEC` | `300` | Seconds a newcomer remains banned after failing the captcha (`60..31536000`) |
 | `CAPTCHA_FAIL_CLOSED` | `false` | Ban the newcomer for `CAPTCHA_BAN_SEC` when the captcha cannot be rendered, instead of letting them in |
 | `PASSED_TTL_DAYS` | `0` | Days a passed user is remembered; `0` keeps them forever |
+| `CAPTCHA_OPERAND_DIGITS` | `1` | Digits per operand: `1` keeps the glyphs large and the sum instant, `2` widens the answer space from 19 to about 180 at the price of readability |
 | `ALLOWED_BOT_IDS` | unset | Comma-separated numeric bot IDs allowed regardless of who added them; other bots must be added by an administrator |
 | `ALLOWED_CHAT_IDS` | unset | Comma-separated numeric chat IDs served by the bot; unset or empty allows every chat |
 | `DATA_FILE` | `data/state.json` | State snapshot location |

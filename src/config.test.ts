@@ -153,3 +153,38 @@ describe('failure policy and retention knobs', () => {
     expect(config.captchaFailClosed).toBe(true);
   });
 });
+
+describe('allowlist and range guards', () => {
+  const cases: Array<[string, Record<string, string>, string]> = [
+    ['a bot id past the safe integer range', { ALLOWED_BOT_IDS: '99999999999999999999' }, 'ALLOWED_BOT_IDS'],
+    ['a zero bot id', { ALLOWED_BOT_IDS: '0' }, 'ALLOWED_BOT_IDS'],
+    ['a chat id past the safe integer range', { ALLOWED_CHAT_IDS: '-99999999999999999999' }, 'ALLOWED_CHAT_IDS'],
+    ['a zero chat id', { ALLOWED_CHAT_IDS: '0' }, 'ALLOWED_CHAT_IDS'],
+    ['a ban shorter than the platform cutoff', { CAPTCHA_BAN_SEC: '30' }, 'CAPTCHA_BAN_SEC'],
+    ['a ban longer than a year', { CAPTCHA_BAN_SEC: '40000000' }, 'CAPTCHA_BAN_SEC'],
+    ['a ban that is not a number', { CAPTCHA_BAN_SEC: 'soon' }, 'CAPTCHA_BAN_SEC'],
+    ['a retention window past the safe integer range', { PASSED_TTL_DAYS: '99999999999999999999' }, 'PASSED_TTL_DAYS'],
+    ['a seed past 32 bits', { CAPTCHA_TEST_SEED: '4294967296', TELEGRAM_API_ROOT: 'http://127.0.0.1:5678' }, 'CAPTCHA_TEST_SEED'],
+  ];
+
+  it.each(cases)('rejects %s', (_name, env, expected) => {
+    expect(() => loadConfig({ BOT_TOKEN: '123:test', ...env })).toThrow(expected);
+  });
+
+  it('an empty allowlist string still means every chat', () => {
+    const config = loadConfig({ BOT_TOKEN: '123:test', ALLOWED_CHAT_IDS: '   ' });
+
+    expect(config.allowedChatIds.size).toBe(0);
+  });
+
+  it('a missing token is refused outright', () => {
+    expect(() => loadConfig({})).toThrow('BOT_TOKEN');
+  });
+
+  it('two-digit operands are opt-in', () => {
+    expect(loadConfig({ BOT_TOKEN: '123:test' }).captchaOperandDigits).toBe(1);
+    expect(
+      loadConfig({ BOT_TOKEN: '123:test', CAPTCHA_OPERAND_DIGITS: '2' }).captchaOperandDigits,
+    ).toBe(2);
+  });
+});

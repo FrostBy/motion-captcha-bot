@@ -21,6 +21,8 @@ services:
       - CAPTCHA_FAIL_CLOSED=${CAPTCHA_FAIL_CLOSED:-false}
       # Days a passed user is remembered; 0 keeps them forever.
       - PASSED_TTL_DAYS=${PASSED_TTL_DAYS:-0}
+      # Digits per operand: 1 reads easily, 2 is harder to guess.
+      - CAPTCHA_OPERAND_DIGITS=${CAPTCHA_OPERAND_DIGITS:-1}
       # Bots allowed regardless of who added them (comma-separated numeric IDs).
       - ALLOWED_BOT_IDS=${ALLOWED_BOT_IDS:-}
       # Chats served by the bot; empty allows all (comma-separated numeric IDs).

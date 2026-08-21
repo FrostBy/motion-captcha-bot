@@ -348,3 +348,97 @@ describe('failure policy and retention', () => {
     expect(deps.state.isPassed(CHAT, 42)).toBe(true);
   });
 });
+
+describe('races and refusals', () => {
+  it('the sweep skips a newcomer who answered while earlier bans were in flight', async () => {
+    const { deps, api } = setup();
+    // Another chat comes first in the batch: its ban is the in-flight one.
+    await onJoin(deps, -100501, { ...guest, id: 8 });
+    await onJoin(deps, CHAT, guest);
+    // The batch is read before the first ban; the answer lands in between.
+    api.banChatMember!.mockImplementationOnce(async () => {
+      deps.state.markPassed(CHAT, 7, 1_000_000);
+      return true;
+    });
+
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+
+    const banned = api.banChatMember!.mock.calls.map((call) => call[1]);
+    expect(banned).not.toContain(7);
+    expect(deps.state.isPassed(CHAT, 7)).toBe(true);
+  });
+
+  it('a ban refused by Telegram is logged, and the newcomer stays out of the veterans', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    api.banChatMember!.mockRejectedValue(new Error('CHAT_ADMIN_REQUIRED'));
+
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+
+    expect(deps.log).toHaveBeenCalledWith(
+      expect.stringContaining('CHAT_ADMIN_REQUIRED'),
+      expect.anything(),
+    );
+    expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+  });
+
+  it('a refused ban after the attempt limit does not whitelist the spammer', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    api.banChatMember!.mockRejectedValue(new Error('CHAT_ADMIN_REQUIRED'));
+
+    for (const messageId of [1, 2, 3]) {
+      await onMessage(deps, CHAT, 7, messageId, '11');
+    }
+    await onMessage(deps, CHAT, 7, 4, 'spam link');
+
+    expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 4);
+  });
+
+  it('a refused ban on the decoy is logged too', async () => {
+    const { deps, api } = setup();
+    deps.captchaDecoy = true;
+    await onJoin(deps, CHAT, guest);
+    api.banChatMember!.mockRejectedValue(new Error('rate limited'));
+
+    await onMessage(deps, CHAT, 7, 555, '8');
+
+    expect(deps.log).toHaveBeenCalledWith(
+      expect.stringContaining('rate limited'),
+      expect.anything(),
+    );
+  });
+
+  it('a refused automatic unban keeps the marker for the next sweep', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+
+    api.unbanChatMember!.mockRejectedValue(new Error('CHAT_ADMIN_REQUIRED'));
+    deps.now = () => 1_000_000 + 61_000 + 300_000 + 1_000;
+    await sweepExpired(deps);
+
+    expect(deps.state.hasTemporaryBan(CHAT, 7)).toBe(true);
+    expect(deps.log).toHaveBeenCalledWith(
+      expect.stringContaining('Automatic unban failed'),
+      expect.anything(),
+    );
+  });
+
+  it('a message sent during our own ban is deleted, not taken as membership', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+
+    // Telegram delivers a message the user sent just before the ban landed.
+    await onMessage(deps, CHAT, 7, 900, 'spam link');
+
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 900);
+    expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+  });
+});

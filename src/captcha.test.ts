@@ -169,3 +169,34 @@ describe('sprinkle and decoy layers', () => {
     expect(Buffer.from(first.frames[0]!)).toEqual(Buffer.from(second.frames[0]!));
   });
 });
+
+describe('two-digit operands', () => {
+  it('both operands stay two digits and the sum matches', () => {
+    for (let i = 0; i < 50; i++) {
+      const { question, answer } = makeExpression(Math.random, 2);
+      const [n, m] = question.split('+').map(Number);
+      expect(n).toBeGreaterThanOrEqual(10);
+      expect(n).toBeLessThanOrEqual(99);
+      expect(m).toBeGreaterThanOrEqual(10);
+      expect(m).toBeLessThanOrEqual(99);
+      expect(n! + m!).toBe(answer);
+    }
+  });
+
+  it('the decoy follows the same width and never repeats the answer', () => {
+    for (let i = 0; i < 25; i++) {
+      const real = makeExpression(Math.random, 2);
+      const decoy = makeDecoy(real.answer, Math.random, 2);
+      expect(decoy.question).toMatch(/^\d{2}\+\d{2}$/);
+      expect(decoy.answer).not.toBe(real.answer);
+    }
+  });
+
+  it('a five-glyph expression still renders unreadable frames', () => {
+    const { frames, mask } = renderFrames('47+38', { style: 'l', random: seededRandom(5) });
+
+    const inside = meanBy(frames[0]!, mask, true);
+    const outside = meanBy(frames[0]!, mask, false);
+    expect(Math.abs(inside - outside)).toBeLessThan(255 * 0.04);
+  });
+});

@@ -1,6 +1,13 @@
 import type { Api } from 'grammy';
 
-import { makeDecoy, makeExpression, renderAnimation, type Motion, type Style } from './captcha.js';
+import {
+  makeDecoy,
+  makeExpression,
+  renderAnimation,
+  type Motion,
+  type OperandDigits,
+  type Style,
+} from './captcha.js';
 import { withRetry, quietly } from './telegram.js';
 import type { Messages } from './config.js';
 import type { State } from './state.js';
@@ -44,6 +51,8 @@ export interface Deps {
   captchaFailClosed?: boolean;
   /** Days a veteran is remembered; 0 or undefined keeps them forever. */
   passedTtlDays?: number;
+  /** Digits per operand: 1 reads easily, 2 is harder to guess. */
+  captchaOperandDigits?: OperandDigits;
   allowedBotIds: ReadonlySet<number>;
   /** Chats served by the bot; empty means every chat, as in the config. */
   allowedChatIds?: ReadonlySet<number>;
@@ -142,8 +151,9 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
   const previous = state.getPending(chatId, member.id);
   if (previous) void quietly(() => api.deleteMessage(chatId, previous.captchaMessageId));
 
-  const captcha = makeExpression(deps.random);
-  const decoy = deps.captchaDecoy ? makeDecoy(captcha.answer, deps.random) : undefined;
+  const digits = deps.captchaOperandDigits ?? 1;
+  const captcha = makeExpression(deps.random, digits);
+  const decoy = deps.captchaDecoy ? makeDecoy(captcha.answer, deps.random, digits) : undefined;
   let video: Uint8Array;
   try {
     video = await renderAnimation(captcha.question, deps.ffmpegPath, {

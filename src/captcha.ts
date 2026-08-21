@@ -95,16 +95,33 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
-export function makeExpression(random: () => number = Math.random): Captcha {
-  const n = Math.floor(random() * 10);
-  const m = Math.floor(random() * 10);
+/**
+ * Digits per operand. Single digits leave nineteen possible sums, so a few
+ * guesses around 9 already carry a real chance; two digits widen the space to
+ * about a hundred and eighty, at the price of a smaller glyph and arithmetic
+ * a human has to think about.
+ */
+export type OperandDigits = 1 | 2;
+
+export function makeExpression(
+  random: () => number = Math.random,
+  digits: OperandDigits = 1,
+): Captcha {
+  const min = digits === 2 ? 10 : 0;
+  const span = digits === 2 ? 90 : 10;
+  const n = min + Math.floor(random() * span);
+  const m = min + Math.floor(random() * span);
   return { question: `${n}+${m}`, answer: n + m };
 }
 
 /** Fake expression whose sum never matches the real one. */
-export function makeDecoy(realAnswer: number, random: () => number = Math.random): Captcha {
+export function makeDecoy(
+  realAnswer: number,
+  random: () => number = Math.random,
+  digits: OperandDigits = 1,
+): Captcha {
   for (;;) {
-    const decoy = makeExpression(random);
+    const decoy = makeExpression(random, digits);
     if (decoy.answer !== realAnswer) return decoy;
   }
 }

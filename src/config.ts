@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import type { Motion, Style } from './captcha.js';
+import type { Motion, OperandDigits, Style } from './captcha.js';
 
 /** Everything is driven by env vars: no settings DB, no admin panel. */
 export interface Config {
@@ -27,6 +27,12 @@ export interface Config {
   captchaFailClosed: boolean;
   /** Days a passed user is remembered; 0 keeps them forever. */
   passedTtlDays: number;
+  /**
+   * Digits per operand. 1 keeps the glyphs large and the arithmetic instant;
+   * 2 widens the answer space from nineteen sums to about a hundred and
+   * eighty, at the price of a smaller glyph and more thinking.
+   */
+  captchaOperandDigits: OperandDigits;
   /** Bots allowed regardless of who added them. */
   allowedBotIds: ReadonlySet<number>;
   /** Chats served by the bot; an empty set allows every chat. */
@@ -172,6 +178,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captchaBanSec: parseCaptchaBanSec(env.CAPTCHA_BAN_SEC),
     captchaFailClosed: env.CAPTCHA_FAIL_CLOSED === 'true',
     passedTtlDays: parsePassedTtlDays(env.PASSED_TTL_DAYS),
+    captchaOperandDigits: env.CAPTCHA_OPERAND_DIGITS === '2' ? 2 : 1,
     allowedBotIds: parseAllowedBotIds(env.ALLOWED_BOT_IDS),
     allowedChatIds: parseAllowedChatIds(env.ALLOWED_CHAT_IDS),
     dataFile: env.DATA_FILE ?? 'data/state.json',
