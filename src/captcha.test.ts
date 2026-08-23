@@ -42,11 +42,20 @@ describe('expression', () => {
     for (let i = 0; i < 50; i++) {
       const { question, answer } = makeExpression();
       const [n, m] = question.split('+').map(Number);
-      expect(n).toBeGreaterThanOrEqual(0);
+      expect(n).toBeGreaterThanOrEqual(1);
       expect(n).toBeLessThanOrEqual(9);
-      expect(m).toBeGreaterThanOrEqual(0);
+      expect(m).toBeGreaterThanOrEqual(1);
       expect(m).toBeLessThanOrEqual(9);
       expect(n! + m!).toBe(answer);
+    }
+  });
+
+  // A zero and an eight look alike under the moving noise, and reading one as
+  // the other costs the newcomer a kick.
+  it('never shows a zero or an eight, in either width', () => {
+    for (let i = 0; i < 200; i++) {
+      expect(makeExpression().question).not.toMatch(/[08]/);
+      expect(makeExpression(Math.random, 2).question).not.toMatch(/[08]/);
     }
   });
 

@@ -103,14 +103,32 @@ export function seededRandom(seed: number): () => number {
  */
 export type OperandDigits = 1 | 2;
 
+/**
+ * Operands never contain a zero or an eight: on the 5x7 grid they differ by
+ * three pixels in the middle, and under the moving noise people read one as the
+ * other — a mistake that costs a kick. The sum is typed, not read, so it may
+ * still contain any digit.
+ */
+const BANNED_DIGITS = /[08]/;
+
+function operandPool(min: number, max: number): number[] {
+  const pool: number[] = [];
+  for (let value = min; value <= max; value++) {
+    if (!BANNED_DIGITS.test(String(value))) pool.push(value);
+  }
+  return pool;
+}
+
+const POOL_1 = operandPool(1, 9);
+const POOL_2 = operandPool(11, 99);
+
 export function makeExpression(
   random: () => number = Math.random,
   digits: OperandDigits = 1,
 ): Captcha {
-  const min = digits === 2 ? 10 : 0;
-  const span = digits === 2 ? 90 : 10;
-  const n = min + Math.floor(random() * span);
-  const m = min + Math.floor(random() * span);
+  const pool = digits === 2 ? POOL_2 : POOL_1;
+  const n = pool[Math.floor(random() * pool.length)]!;
+  const m = pool[Math.floor(random() * pool.length)]!;
   return { question: `${n}+${m}`, answer: n + m };
 }
 
