@@ -167,7 +167,8 @@ pkgs.testers.nixosTest {
             "chat_type": "supergroup",
             "user_id": 7,
             "message_id": 700,
-            "text": "10",
+            # Seed 42 draws 5+4 now that zero and eight are out of the pool.
+            "text": "9",
         })
         welcome = wait_for_message(lambda message: "Welcome aboard" in message.get("text", ""), "welcome")
         assert welcome["chat"]["id"] == ${toString chatId}, welcome
@@ -201,7 +202,8 @@ pkgs.testers.nixosTest {
             "chat_type": "supergroup",
             "user_id": 9,
             "message_id": 900,
-            "text": "14",
+            # The decoy for that seed is 7+6.
+            "text": "13",
         })
         bans = wait_for_request("banChatMember", "decoy ban")
         assert len(bans) == 1 and int(bans[0]["parameters"]["user_id"]) == 9, bans
