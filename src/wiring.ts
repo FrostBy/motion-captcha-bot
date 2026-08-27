@@ -1,6 +1,13 @@
 import type { Bot } from 'grammy';
 
-import { onJoin, onMessage, onPromoted, onSeenInside, type Deps } from './handlers.js';
+import {
+  onJoin,
+  onJoinMessage,
+  onMessage,
+  onPromoted,
+  onSeenInside,
+  type Deps,
+} from './handlers.js';
 
 /**
  * Update wiring, kept apart from process startup so it can be tested without
@@ -20,6 +27,30 @@ export interface Wiring {
 /** Only these chat types can have newcomers to challenge. */
 function isGroup(type: string): boolean {
   return type === 'group' || type === 'supergroup';
+}
+
+/** Fields Telegram fills in itself: nobody typed such a message. */
+const SERVICE_FIELDS = [
+  'new_chat_members',
+  'left_chat_member',
+  'new_chat_title',
+  'new_chat_photo',
+  'delete_chat_photo',
+  'pinned_message',
+  'group_chat_created',
+  'supergroup_chat_created',
+  'channel_chat_created',
+  'message_auto_delete_timer_changed',
+  'migrate_to_chat_id',
+  'migrate_from_chat_id',
+  'video_chat_started',
+  'video_chat_ended',
+  'video_chat_scheduled',
+  'video_chat_participants_invited',
+] as const;
+
+function isServiceMessage(message: Record<string, unknown>): boolean {
+  return SERVICE_FIELDS.some((field) => message[field] !== undefined);
 }
 
 /**
@@ -100,9 +131,25 @@ export function registerHandlers(bot: Bot<any>, wiring: Wiring): void {
     if (promoted && !user.is_bot) onPromoted(deps, chatId, user.id);
   });
 
+  // "X joined the group" is a line written by Telegram, not by the newcomer:
+  // judging it as their message sent it to the bin along with the chat's own
+  // history of who came in. Kept, and remembered in case we kick them.
+  bot.on('message:new_chat_members', async (ctx) => {
+    if (!isGroup(ctx.chat.type)) return;
+    for (const member of ctx.message.new_chat_members) {
+      // A bot is met by onJoin, which kicks it and cleans up after itself.
+      if (!member.is_bot) {
+        await onJoinMessage(deps, ctx.chat.id, member.id, ctx.message.message_id);
+      }
+    }
+  });
+
   bot.on('message', async (ctx) => {
     if (!isGroup(ctx.chat.type)) return;
     if (ctx.from.is_bot) return;
+    // Service messages (a join, a leave, a pin) belong to the chat, not to the
+    // newcomer — the bin is for what they actually wrote.
+    if (isServiceMessage(ctx.message)) return;
     await onMessage(deps, ctx.chat.id, ctx.from.id, ctx.message.message_id, ctx.message.text);
   });
 

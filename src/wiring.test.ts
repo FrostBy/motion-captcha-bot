@@ -7,6 +7,7 @@ import { createSweeper, registerHandlers, type Wiring } from './wiring.js';
 // The wiring is judged by what it calls, so the handlers themselves are mocks.
 const handlers = vi.hoisted(() => ({
   onJoin: vi.fn(async () => undefined),
+  onJoinMessage: vi.fn(async () => undefined),
   onMessage: vi.fn(async () => undefined),
   onPromoted: vi.fn(() => undefined),
   onSeenInside: vi.fn(() => undefined),
@@ -318,5 +319,54 @@ describe('sweeper', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(order).toEqual(['update', 'sweep']);
+  });
+});
+
+/**
+ * The join line is written by Telegram, not by the newcomer: it used to reach
+ * onMessage and die there as spam, together with the chat's record of who
+ * came in.
+ */
+describe('service messages', () => {
+  it('a join goes to its own handler, not to the captcha check', async () => {
+    const { bot } = setup();
+
+    await bot.deliver('message:new_chat_members', {
+      chat: { id: CHAT, type: 'supergroup' },
+      from: { id: 7, is_bot: false },
+      message: {
+        message_id: 55,
+        new_chat_members: [{ id: 7, is_bot: false, first_name: 'Guest' }],
+      },
+    });
+
+    expect(handlers.onJoinMessage).toHaveBeenCalledWith(expect.anything(), CHAT, 7, 55);
+    expect(handlers.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('a joining bot needs no remembering: onJoin cleans up after it', async () => {
+    const { bot } = setup();
+
+    await bot.deliver('message:new_chat_members', {
+      chat: { id: CHAT, type: 'supergroup' },
+      from: { id: 7, is_bot: false },
+      message: { message_id: 56, new_chat_members: [{ id: 9, is_bot: true, first_name: 'Bot' }] },
+    });
+
+    expect(handlers.onJoinMessage).not.toHaveBeenCalled();
+  });
+
+  it('other service messages are not newcomer spam either', async () => {
+    const { bot } = setup();
+
+    for (const service of [{ left_chat_member: { id: 7 } }, { pinned_message: { message_id: 1 } }]) {
+      await bot.deliver('message', {
+        chat: { id: CHAT, type: 'supergroup' },
+        from: { id: 7, is_bot: false },
+        message: { message_id: 57, ...service },
+      });
+    }
+
+    expect(handlers.onMessage).not.toHaveBeenCalled();
   });
 });

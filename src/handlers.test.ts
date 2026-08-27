@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MESSAGES } from './config.js';
 import {
   onJoin,
+  onJoinMessage,
   onMessage,
   onPromoted,
   onSeenInside,
@@ -463,5 +464,76 @@ describe('races and refusals', () => {
 
     expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 900);
     expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+  });
+});
+
+/**
+ * "X joined the group" is a line written by Telegram, not by the newcomer.
+ * It used to die as newcomer spam: no text, no captcha match, straight to the
+ * bin — taking the chat's own record of who came in with it.
+ */
+describe('join service message', () => {
+  it('is kept on arrival and remembered', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    api.deleteMessage?.mockClear();
+
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    expect(api.deleteMessage).not.toHaveBeenCalled();
+    expect(deps.state.getPending(CHAT, guest.id)?.joinMessageId).toBe(55);
+  });
+
+  it('survives arriving before the pending record', async () => {
+    // Telegram promises no order between the service message and the status
+    // update: the early one waits in the park for its record.
+    const { deps } = setup();
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+    await onJoin(deps, CHAT, guest);
+
+    expect(deps.state.getPending(CHAT, guest.id)?.joinMessageId).toBe(55);
+  });
+
+  it('goes away with the kick: a spammer leaves no trace', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    for (let attempt = 0; attempt < deps.captchaMaxAttempts; attempt += 1) {
+      await onMessage(deps, CHAT, guest.id, 300, '1');
+    }
+
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 55);
+  });
+
+  it('stays for whoever passed the captcha', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    await onMessage(deps, CHAT, guest.id, 300, '5');
+
+    expect(api.deleteMessage).not.toHaveBeenCalledWith(CHAT, 55);
+  });
+
+  it('an expired captcha takes the join line along', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    deps.now = () => 1_000_000 + deps.timeoutSec * 1000 + 1;
+    await sweepExpired(deps);
+
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 55);
+  });
+
+  it('a bot kicked on arrival takes its own join line', async () => {
+    const { deps, api } = setup();
+    const robot = { id: 9, isBot: true, firstName: 'Bot', addedBy: 7 };
+    await onJoinMessage(deps, CHAT, robot.id, 77);
+
+    await onJoin(deps, CHAT, robot);
+
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 77);
   });
 });

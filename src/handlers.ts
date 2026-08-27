@@ -10,7 +10,7 @@ import {
 } from './captcha.js';
 import { withRetry, quietly } from './telegram.js';
 import type { Messages } from './config.js';
-import type { State } from './state.js';
+import type { Pending, State } from './state.js';
 
 export type ChatMemberStatus = Awaited<ReturnType<Api['getChatMember']>>['status'];
 
@@ -134,6 +134,46 @@ async function banFailedNewcomer(deps: Deps, chatId: number, userId: number): Pr
   await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate));
 }
 
+/**
+ * Drop the "joined the group" line behind someone we threw out: a spammer
+ * leaves no trace in the chat. Whoever passed the captcha keeps their line
+ * like everyone else, so this is never called on the happy path.
+ *
+ * The id comes from the pending record, or from the park when the record is
+ * already gone: the service message is a separate update with no promised
+ * order.
+ */
+async function dropJoinMessage(
+  deps: Deps,
+  chatId: number,
+  userId: number,
+  pending?: Pending,
+): Promise<void> {
+  const now = deps.now?.() ?? Date.now();
+  const messageId = pending?.joinMessageId ?? deps.state.takeJoinMessage(chatId, userId, now);
+  if (messageId !== undefined) await quietly(() => deps.api.deleteMessage(chatId, messageId));
+}
+
+/**
+ * The "X joined the group" service message. Left alone on arrival: the line
+ * belongs to the newcomer as much as to anyone else. Its id is stored next to
+ * the pending record in case we end up kicking them.
+ */
+export async function onJoinMessage(
+  deps: Deps,
+  chatId: number,
+  userId: number,
+  messageId: number,
+): Promise<void> {
+  const pending = deps.state.getPending(chatId, userId);
+  if (pending) {
+    deps.state.setPending(chatId, userId, { ...pending, joinMessageId: messageId });
+    return;
+  }
+  // The record is not there yet: the chat_member update is still on its way.
+  deps.state.parkJoinMessage(chatId, userId, messageId, deps.now?.() ?? Date.now());
+}
+
 export async function onJoin(deps: Deps, chatId: number, member: Member): Promise<void> {
   const { api, state } = deps;
 
@@ -157,6 +197,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
       addedBy: member.addedBy,
     });
     await kick(deps, chatId, member.id);
+    await dropJoinMessage(deps, chatId, member.id);
     return;
   }
 
@@ -215,11 +256,14 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
       fill(deps.messages.captcha, member.id, member.firstName, deps.timeoutSec),
     ),
   );
+  const now = deps.now?.() ?? Date.now();
   state.setPending(chatId, member.id, {
     answer: captcha.answer,
     decoyAnswer: decoy?.answer,
-    deadline: (deps.now?.() ?? Date.now()) + deps.timeoutSec * 1000,
+    deadline: now + deps.timeoutSec * 1000,
     captchaMessageId: sent.message_id,
+    // The join service message may have arrived before this record existed.
+    joinMessageId: state.takeJoinMessage(chatId, member.id, now),
     firstName: member.firstName,
   });
 }
@@ -302,6 +346,7 @@ export async function onMessage(
     await banFailedNewcomer(deps, chatId, userId).catch((error) =>
       deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
     );
+    await dropJoinMessage(deps, chatId, userId, pending);
     return;
   }
 
@@ -332,6 +377,7 @@ export async function onMessage(
       await banFailedNewcomer(deps, chatId, userId).catch((error) =>
         deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
       );
+      await dropJoinMessage(deps, chatId, userId, pending);
       return;
     }
     state.setPending(chatId, userId, { ...pending, attempts });
@@ -376,5 +422,6 @@ export async function sweepExpired(deps: Deps): Promise<void> {
       deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
     );
     await quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
+    await dropJoinMessage(deps, chatId, userId, current);
   }
 }

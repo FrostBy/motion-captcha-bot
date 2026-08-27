@@ -12,6 +12,12 @@ export interface Pending {
   deadline: number;
   /** The captcha message, deleted whatever the outcome. */
   captchaMessageId: number;
+  /**
+   * The "X joined the group" service message. Kept while the newcomer is on
+   * trial and deleted only along with a kick: a spammer leaves no trace, while
+   * someone who passed keeps their join line like everyone else.
+   */
+  joinMessageId?: number;
   /** Wrong answers so far; too many of them means a temporary ban. */
   attempts?: number;
   /** For the %username% placeholder in the welcome message. */
@@ -24,6 +30,9 @@ export interface Pending {
  * read as "seen inside" and whitelist the very user we just kicked.
  */
 const KICK_MARKER_TTL_MS = 60_000;
+
+/** How long an unclaimed join message waits for its pending record. */
+const JOIN_PARK_TTL_MS = 5 * 60_000;
 
 interface ChatState {
   /**
@@ -51,6 +60,8 @@ export class State {
   private kicks = new Map<string, number>();
   /** Captcha bans by "chatId:userId", value is the scheduled unban time. */
   private temporaryBans = new Map<string, number>();
+  /** Join messages waiting for their pending record; not worth a snapshot. */
+  private parkedJoins = new Map<string, { messageId: number; until: number }>();
   private dirty = false;
   private timer?: NodeJS.Timeout;
   private flushQueue: Promise<void> = Promise.resolve();
@@ -190,6 +201,24 @@ export class State {
 
   clearPending(chatId: number, userId: number): void {
     if (this.chat(chatId).pending.delete(userId)) this.dirty = true;
+  }
+
+  /**
+   * The join service message can arrive before the chat_member update that
+   * creates the pending record — Telegram promises no order. Parked in memory
+   * until the record exists; losing it on restart only means the line stays in
+   * the chat, which is the safe outcome.
+   */
+  parkJoinMessage(chatId: number, userId: number, messageId: number, now: number): void {
+    this.parkedJoins.set(`${chatId}:${userId}`, { messageId, until: now + JOIN_PARK_TTL_MS });
+  }
+
+  takeJoinMessage(chatId: number, userId: number, now: number): number | undefined {
+    const key = `${chatId}:${userId}`;
+    const parked = this.parkedJoins.get(key);
+    if (!parked) return undefined;
+    this.parkedJoins.delete(key);
+    return parked.until > now ? parked.messageId : undefined;
   }
 
   /** Remember that the bot itself is kicking this user right now. */
