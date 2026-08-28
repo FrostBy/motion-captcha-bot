@@ -134,22 +134,26 @@ export function registerHandlers(bot: Bot<any>, wiring: Wiring): void {
   // "X joined the group" is a line written by Telegram, not by the newcomer:
   // judging it as their message sent it to the bin along with the chat's own
   // history of who came in. Kept, and remembered in case we kick them.
+  //
+  // Only a line about a single arrival is remembered. One about several is
+  // shared: deleting it behind whoever failed the captcha would erase the
+  // record of arrival for those who passed, and Telegram cannot delete a part
+  // of a service message.
   bot.on('message:new_chat_members', async (ctx) => {
     if (!isGroup(ctx.chat.type)) return;
-    for (const member of ctx.message.new_chat_members) {
-      // A bot is met by onJoin, which kicks it and cleans up after itself.
-      if (!member.is_bot) {
-        await onJoinMessage(deps, ctx.chat.id, member.id, ctx.message.message_id);
-      }
-    }
+    const [member, ...rest] = ctx.message.new_chat_members;
+    if (member === undefined || rest.length > 0) return;
+    await onJoinMessage(deps, ctx.chat.id, member.id, ctx.message.message_id);
   });
 
   bot.on('message', async (ctx) => {
     if (!isGroup(ctx.chat.type)) return;
-    if (ctx.from.is_bot) return;
     // Service messages (a join, a leave, a pin) belong to the chat, not to the
-    // newcomer — the bin is for what they actually wrote.
+    // newcomer — the bin is for what they actually wrote. Their author is not
+    // a signal either: a member added by an anonymous admin arrives from
+    // Telegram itself.
     if (isServiceMessage(ctx.message)) return;
+    if (ctx.from.is_bot) return;
     await onMessage(deps, ctx.chat.id, ctx.from.id, ctx.message.message_id, ctx.message.text);
   });
 

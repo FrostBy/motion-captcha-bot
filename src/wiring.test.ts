@@ -344,7 +344,7 @@ describe('service messages', () => {
     expect(handlers.onMessage).not.toHaveBeenCalled();
   });
 
-  it('a joining bot needs no remembering: onJoin cleans up after it', async () => {
+  it('a joining bot is remembered too: its line goes with the kick', async () => {
     const { bot } = setup();
 
     await bot.deliver('message:new_chat_members', {
@@ -353,7 +353,43 @@ describe('service messages', () => {
       message: { message_id: 56, new_chat_members: [{ id: 9, is_bot: true, first_name: 'Bot' }] },
     });
 
+    expect(handlers.onJoinMessage).toHaveBeenCalledWith(expect.anything(), CHAT, 9, 56);
+  });
+
+  it('a line about several arrivals is shared, so it is not remembered', async () => {
+    // Deleting it behind whoever failed would erase the record of arrival for
+    // those who passed, and Telegram cannot delete a part of it.
+    const { bot } = setup();
+
+    await bot.deliver('message:new_chat_members', {
+      chat: { id: CHAT, type: 'supergroup' },
+      from: { id: 7, is_bot: false },
+      message: {
+        message_id: 57,
+        new_chat_members: [
+          { id: 7, is_bot: false, first_name: 'Guest' },
+          { id: 8, is_bot: false, first_name: 'Other' },
+        ],
+      },
+    });
+
     expect(handlers.onJoinMessage).not.toHaveBeenCalled();
+  });
+
+  it('someone added by an anonymous admin is remembered as well', async () => {
+    // Telegram lists itself as the author of such a line.
+    const { bot } = setup();
+
+    await bot.deliver('message:new_chat_members', {
+      chat: { id: CHAT, type: 'supergroup' },
+      from: { id: 1087968824, is_bot: true },
+      message: {
+        message_id: 58,
+        new_chat_members: [{ id: 7, is_bot: false, first_name: 'Guest' }],
+      },
+    });
+
+    expect(handlers.onJoinMessage).toHaveBeenCalledWith(expect.anything(), CHAT, 7, 58);
   });
 
   it('other service messages are not newcomer spam either', async () => {

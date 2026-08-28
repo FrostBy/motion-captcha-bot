@@ -530,10 +530,73 @@ describe('join service message', () => {
   it('a bot kicked on arrival takes its own join line', async () => {
     const { deps, api } = setup();
     const robot = { id: 9, isBot: true, firstName: 'Bot', addedBy: 7 };
+    // The same route as in production: the line arrives as its own update and
+    // a bot gets no pending record, so the id waits in the park.
     await onJoinMessage(deps, CHAT, robot.id, 77);
 
     await onJoin(deps, CHAT, robot);
 
     expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 77);
+  });
+
+  it('answering the decoy takes the line along too', async () => {
+    const { deps, api } = setup();
+    deps.captchaDecoy = true;
+    await onJoin(deps, CHAT, guest);
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    // 8 is the fake expression's answer: only a bot reads that layer.
+    await onMessage(deps, CHAT, guest.id, 300, '8');
+
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 55);
+  });
+
+  it('a repeated join keeps the line from the first one', async () => {
+    // The leave update may never arrive: the record is alive, the new line is
+    // not there yet, and forgetting the old one leaves the kick with nothing.
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    await onJoin(deps, CHAT, guest);
+    expect(deps.state.getPending(CHAT, guest.id)?.joinMessageId).toBe(55);
+
+    for (let attempt = 0; attempt < deps.captchaMaxAttempts; attempt += 1) {
+      await onMessage(deps, CHAT, guest.id, 300, '1');
+    }
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 55);
+  });
+
+  it('a broken renderer that bans still takes the line', async () => {
+    const { deps, api } = setup();
+    deps.captchaFailClosed = true;
+    const { renderAnimation } = await import('./captcha.js');
+    vi.mocked(renderAnimation).mockRejectedValueOnce(new Error('no ffmpeg'));
+    await onJoinMessage(deps, CHAT, guest.id, 55);
+
+    await onJoin(deps, CHAT, guest);
+
+    expect(api.banChatMember).toHaveBeenCalled();
+    expect(api.deleteMessage).toHaveBeenCalledWith(CHAT, 55);
+  });
+
+  it('the scheduled pass leaves a fresh park alone', async () => {
+    const { deps } = setup();
+    await onJoinMessage(deps, CHAT, 42, 55);
+
+    deps.now = () => 1_000_000 + 60_000;
+    await sweepExpired(deps);
+
+    expect(deps.state.takeJoinMessage(CHAT, 42, deps.now())).toBe(55);
+  });
+
+  it('an expired park is neither served nor kept', async () => {
+    const { deps } = setup();
+    await onJoinMessage(deps, CHAT, 42, 55);
+
+    deps.now = () => 1_000_000 + 6 * 60_000;
+    await sweepExpired(deps);
+
+    expect(deps.state.takeJoinMessage(CHAT, 42, deps.now())).toBeUndefined();
   });
 });

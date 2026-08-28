@@ -221,6 +221,18 @@ export class State {
     return parked.until > now ? parked.messageId : undefined;
   }
 
+  /**
+   * Throw away parked lines nobody came for. Only a newcomer's arrival takes
+   * them, and not every join gets that far: a veteran returning, someone
+   * already gone, a broken renderer — and in a chat where the bot is not an
+   * admin there is no arrival update at all.
+   */
+  sweepParkedJoins(now: number): void {
+    for (const [key, parked] of this.parkedJoins) {
+      if (parked.until <= now) this.parkedJoins.delete(key);
+    }
+  }
+
   /** Remember that the bot itself is kicking this user right now. */
   markKicking(chatId: number, userId: number, now: number, ttlMs = KICK_MARKER_TTL_MS): void {
     this.kicks.set(`${chatId}:${userId}`, now + ttlMs);

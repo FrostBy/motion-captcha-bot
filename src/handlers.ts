@@ -165,13 +165,14 @@ export async function onJoinMessage(
   userId: number,
   messageId: number,
 ): Promise<void> {
-  const pending = deps.state.getPending(chatId, userId);
-  if (pending) {
-    deps.state.setPending(chatId, userId, { ...pending, joinMessageId: messageId });
-    return;
-  }
-  // The record is not there yet: the chat_member update is still on its way.
+  // The record may not exist yet — the chat_member update is still on its way —
+  // so the id is both parked and written: which of the two lands depends on
+  // whichever update came first.
   deps.state.parkJoinMessage(chatId, userId, messageId, deps.now?.() ?? Date.now());
+  const pending = deps.state.getPending(chatId, userId);
+  // Через setPending, а не мутацией: иначе состояние не пометится изменённым и
+  // номер не переживёт перезапуск. Гонки тут нет — апдейты идут через очередь.
+  if (pending) deps.state.setPending(chatId, userId, { ...pending, joinMessageId: messageId });
 }
 
 export async function onJoin(deps: Deps, chatId: number, member: Member): Promise<void> {
@@ -241,6 +242,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
       await banFailedNewcomer(deps, chatId, member.id).catch((banError) =>
         deps.log(`Ban failed: ${errorText(banError)}`, { chatId, userId: member.id }),
       );
+      await dropJoinMessage(deps, chatId, member.id, previous);
       return;
     }
     // Keeping someone pending with no captcha is unfair, let them in loudly.
@@ -262,8 +264,10 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
     decoyAnswer: decoy?.answer,
     deadline: now + deps.timeoutSec * 1000,
     captchaMessageId: sent.message_id,
-    // The join service message may have arrived before this record existed.
-    joinMessageId: state.takeJoinMessage(chatId, member.id, now),
+    // The line may have arrived before this record existed. On a repeated join
+    // the new one is not there yet, and forgetting the old id would leave the
+    // kick with nothing to delete.
+    joinMessageId: state.takeJoinMessage(chatId, member.id, now) ?? previous?.joinMessageId,
     firstName: member.firstName,
   });
 }
@@ -387,6 +391,9 @@ export async function onMessage(
 /** Timer sweep: expired newcomers get temporarily banned, restart survivors included. */
 export async function sweepExpired(deps: Deps): Promise<void> {
   const now = deps.now?.() ?? Date.now();
+  // Join lines nobody came for: not every arrival reaches the pending record,
+  // and without this pass the park would grow for the whole life of the process.
+  deps.state.sweepParkedJoins(now);
   // Updates from unserved chats never reach the handlers; entries left over
   // from an earlier allowlist must not be moderated behind their backs.
   const served = (chatId: number): boolean =>
