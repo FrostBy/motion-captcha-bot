@@ -2,8 +2,6 @@
   pkgs,
   module,
   package,
-  telegymModule,
-  telegymPackage,
 }:
 
 let
@@ -12,6 +10,7 @@ let
   telegymPort = 5678;
   metricsPort = 9104;
   telegymUrl = "http://127.0.0.1:${toString telegymPort}";
+  telegym = pkgs.callPackage ./telegym.nix { };
 in
 pkgs.testers.nixosTest {
   name = "motion-captcha-bot-service";
@@ -19,7 +18,6 @@ pkgs.testers.nixosTest {
   containers.machine = {
     imports = [
       module
-      telegymModule
     ];
 
     environment.systemPackages = [
@@ -27,13 +25,16 @@ pkgs.testers.nixosTest {
       pkgs.jq
     ];
 
-    services.telegym-mock = {
-      enable = true;
-      package = telegymPackage;
-      port = telegymPort;
-      metrics = {
-        enable = true;
-        port = metricsPort;
+    systemd.services.telegym-mock = {
+      wantedBy = [ "multi-user.target" ];
+      environment = {
+        TELEGYM_MOCK_LISTEN = "127.0.0.1:${toString telegymPort}";
+        TELEGYM_MOCK_METRICS_LISTEN = "127.0.0.1:${toString metricsPort}";
+        TELEGYM_MOCK_QUIET = "true";
+      };
+      serviceConfig = {
+        ExecStart = pkgs.lib.getExe telegym;
+        Restart = "on-failure";
       };
     };
 
@@ -87,7 +88,7 @@ pkgs.testers.nixosTest {
             "POST",
             {"token": "${token}", **body},
         )
-        assert response["ok"] and response["delivery_method"] == "polling", response
+        assert response["ok"] and response["queued"], response
 
     def captured_messages():
         return request("/debug/messages/${token}?chat_id=${toString chatId}")["messages"]
@@ -157,10 +158,11 @@ pkgs.testers.nixosTest {
         captcha = join(7, "Alice")
         assert captcha["caption"].startswith('<a href="tg://user?id=7">Alice</a>'), captcha
         assert captcha["animation"]["file_size"] > 0, captcha
-        machine.succeed(
-            "curl -fsS ${telegymUrl}/debug/files/%s >/dev/null"
+        uploaded_size = machine.succeed(
+            "curl -fsS ${telegymUrl}/debug/files/%s -o /dev/null -w '%%{size_download}'"
             % shlex.quote(captcha["animation"]["file_id"])
         )
+        assert int(uploaded_size) == captcha["animation"]["file_size"], captcha
         inject({
             "type": "edited_message",
             "chat_id": ${toString chatId},
