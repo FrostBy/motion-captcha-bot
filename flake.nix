@@ -2,13 +2,11 @@
   description = "Motion-readable Telegram captcha bot";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.telegym.url = "github:booxter/telegym/lolek-missing-features";
 
   outputs =
     {
       self,
       nixpkgs,
-      telegym,
       ...
     }:
     let
@@ -42,8 +40,6 @@
             inherit pkgs;
             module = self.nixosModules.default;
             package = self.packages.${system}.motion-captcha-bot;
-            telegymModule = telegym.nixosModules.default;
-            telegymPackage = telegym.packages.${system}.telegym;
           };
         }
       );
