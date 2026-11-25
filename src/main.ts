@@ -4,7 +4,7 @@ import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import { createSerialGate } from './gate.js';
 import { sweepExpired, type ChatApi, type Deps } from './handlers.js';
-import type { Log } from './logging.js';
+import { errorText, type Log } from './logging.js';
 import { State } from './state.js';
 import { createSweeper, registerHandlers, SWEEP_INTERVAL_MS } from './wiring.js';
 
@@ -16,6 +16,10 @@ function logLine(message: string): string {
 const log: Log = (message, context) => {
   console.log(logLine(message), context ?? '');
 };
+
+function fatal(message: string, error: unknown): void {
+  process.stderr.write(`${logLine(`${message}: ${errorText(error)}`)}\n`, () => process.exit(1));
+}
 
 const state = new State(config.dataFile);
 state.load();
@@ -88,8 +92,11 @@ async function shutdown(): Promise<void> {
   await state.stop();
   process.exit(0);
 }
-process.on('SIGTERM', () => void shutdown());
-process.on('SIGINT', () => void shutdown());
+function requestShutdown(): void {
+  void shutdown().catch((error) => fatal('Shutdown failed', error));
+}
+process.on('SIGTERM', requestShutdown);
+process.on('SIGINT', requestShutdown);
 
 // Plain bot.start() handles updates strictly one at a time: captcha renders
 // (25-165ms of CPU each) never overlap, and a join flood queues up instead of
@@ -102,4 +109,4 @@ void bot.start({
     deps.botId = me.id;
     deps.log(`Started @${me.username}`);
   },
-});
+}).catch((error) => fatal('Telegram polling failed', error));
