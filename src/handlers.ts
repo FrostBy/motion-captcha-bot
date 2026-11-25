@@ -108,7 +108,11 @@ async function hasLeft(deps: Deps, chatId: number, userId: number): Promise<bool
 async function kick(deps: Deps, chatId: number, userId: number): Promise<void> {
   deps.state.markKicking(chatId, userId, deps.now?.() ?? Date.now());
   await withRetry(() => deps.api.banChatMember(chatId, userId));
-  await quietly(() => deps.api.unbanChatMember(chatId, userId));
+  try {
+    await withRetry(() => deps.api.unbanChatMember(chatId, userId));
+  } catch (error) {
+    deps.log(`Could not lift ban after kick: ${errorText(error)}`, { chatId, userId });
+  }
 }
 
 /** Ban a failed newcomer until Telegram automatically lets them try again. */
