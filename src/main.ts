@@ -22,8 +22,8 @@ function fatal(message: string, error: unknown): void {
 }
 
 const state = new State(config.dataFile);
-state.load();
-state.startFlusher();
+state.load(log);
+state.startFlusher((error) => fatal('Periodic state snapshot failed', error));
 
 const bot = new Bot(config.botToken, {
   client: {

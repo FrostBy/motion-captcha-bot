@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { errorText } from './logging.js';
+
 /** A newcomer waiting to answer the captcha. */
 export interface Pending {
   /** The expected sum. */
@@ -76,7 +78,10 @@ export class State {
     let raw: string;
     try {
       raw = readFileSync(this.file, 'utf8');
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        warn(`Could not read snapshot ${this.file}, starting empty: ${errorText(error)}`);
+      }
       return;
     }
     try {
@@ -109,8 +114,8 @@ export class State {
     }
   }
 
-  startFlusher(): void {
-    this.timer = setInterval(() => void this.flush(), this.flushMs);
+  startFlusher(onError: (error: unknown) => void): void {
+    this.timer = setInterval(() => void this.flush().catch(onError), this.flushMs);
     this.timer.unref?.();
   }
 
