@@ -1,7 +1,5 @@
 /**
- * Telegram call wrappers: a 429 waits the announced retry_after and retries,
- * while "cosmetics" (deleting messages, lifting bans) never crash the
- * process: the message may have been removed by hand before us.
+ * A Telegram 429 waits the announced retry_after and retries.
  */
 
 interface TooMany {
@@ -31,8 +29,4 @@ export async function withRetry<T>(call: () => Promise<T>, attempts = 3): Promis
     }
   }
   throw last;
-}
-
-export async function quietly(call: () => Promise<unknown>): Promise<void> {
-  await withRetry(call).catch(() => undefined);
 }

@@ -8,7 +8,8 @@ import {
   type OperandDigits,
   type Style,
 } from './captcha.js';
-import { withRetry, quietly } from './telegram.js';
+import { withRetry } from './telegram.js';
+import { errorText, type Log } from './logging.js';
 import type { Messages } from './config.js';
 import type { Pending, State } from './state.js';
 
@@ -59,7 +60,7 @@ export interface Deps {
   /** Own id: updates this bot itself caused are not evidence about a user. */
   botId?: number;
   messages: Messages;
-  log: (message: string, extra?: unknown) => void;
+  log: Log;
   now?: () => number;
   random?: () => number;
 }
@@ -84,8 +85,18 @@ const WELCOME_TTL_MS = 30_000;
 /** Keep automatic-unban updates recognizable even when delivery is delayed. */
 const CHAT_MEMBER_UPDATE_GRACE_MS = 60_000;
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+async function deleteMessage(
+  deps: Deps,
+  chatId: number,
+  userId: number,
+  messageId: number,
+  kind: 'captcha' | 'join message' | 'newcomer message' | 'welcome message',
+): Promise<void> {
+  try {
+    await withRetry(() => deps.api.deleteMessage(chatId, messageId));
+  } catch (error) {
+    deps.log(`Could not delete ${kind}: ${errorText(error)}`, { chatId, userId, messageId });
+  }
 }
 
 /**
@@ -111,7 +122,11 @@ async function hasLeft(deps: Deps, chatId: number, userId: number): Promise<bool
 async function kick(deps: Deps, chatId: number, userId: number): Promise<void> {
   deps.state.markKicking(chatId, userId, deps.now?.() ?? Date.now());
   await withRetry(() => deps.api.banChatMember(chatId, userId));
-  await quietly(() => deps.api.unbanChatMember(chatId, userId));
+  try {
+    await withRetry(() => deps.api.unbanChatMember(chatId, userId));
+  } catch (error) {
+    deps.log(`Could not lift ban after kick: ${errorText(error)}`, { chatId, userId });
+  }
 }
 
 /** Ban a failed newcomer until Telegram automatically lets them try again. */
@@ -131,7 +146,9 @@ async function banFailedNewcomer(deps: Deps, chatId: number, userId: number): Pr
   await deps.state.flush().catch((error) =>
     deps.log(`State snapshot before the ban failed: ${errorText(error)}`, { chatId, userId }),
   );
-  await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate));
+  await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate)).catch((error) =>
+    deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
+  );
 }
 
 /**
@@ -151,7 +168,9 @@ async function dropJoinMessage(
 ): Promise<void> {
   const now = deps.now?.() ?? Date.now();
   const messageId = pending?.joinMessageId ?? deps.state.takeJoinMessage(chatId, userId, now);
-  if (messageId !== undefined) await quietly(() => deps.api.deleteMessage(chatId, messageId));
+  if (messageId !== undefined) {
+    await deleteMessage(deps, chatId, userId, messageId, 'join message');
+  }
 }
 
 /**
@@ -217,7 +236,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
 
   // A repeated join while still pending must not orphan the old captcha.
   const previous = state.getPending(chatId, member.id);
-  if (previous) void quietly(() => api.deleteMessage(chatId, previous.captchaMessageId));
+  if (previous) void deleteMessage(deps, chatId, member.id, previous.captchaMessageId, 'captcha');
 
   const digits = deps.captchaOperandDigits ?? 1;
   const captcha = makeExpression(deps.random, digits);
@@ -239,14 +258,15 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
         chatId,
         userId: member.id,
       });
-      await banFailedNewcomer(deps, chatId, member.id).catch((banError) =>
-        deps.log(`Ban failed: ${errorText(banError)}`, { chatId, userId: member.id }),
-      );
+      await banFailedNewcomer(deps, chatId, member.id);
       await dropJoinMessage(deps, chatId, member.id, previous);
       return;
     }
     // Keeping someone pending with no captcha is unfair, let them in loudly.
-    deps.log(`Captcha render failed, newcomer let through: ${errorText(error)}`, { chatId });
+    deps.log(`Captcha render failed, newcomer let through: ${errorText(error)}`, {
+      chatId,
+      userId: member.id,
+    });
     state.markPassed(chatId, member.id, deps.now?.() ?? Date.now());
     return;
   }
@@ -302,7 +322,7 @@ export function onSeenInside(
   if (pending) {
     // A pending user left on their own: drop the captcha and forget.
     deps.state.clearPending(chatId, userId);
-    void quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
+    void deleteMessage(deps, chatId, userId, pending.captchaMessageId, 'captcha');
     return;
   }
   // Leaving a ban behind (kicked -> left) is not membership.
@@ -313,7 +333,7 @@ export function onSeenInside(
 /** A pending user promoted to admin is obviously trusted: waive the captcha. */
 export function onPromoted(deps: Deps, chatId: number, userId: number): void {
   const pending = deps.state.getPending(chatId, userId);
-  if (pending) void quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
+  if (pending) void deleteMessage(deps, chatId, userId, pending.captchaMessageId, 'captcha');
   deps.state.markPassed(chatId, userId, deps.now?.() ?? Date.now());
 }
 
@@ -331,7 +351,7 @@ export async function onMessage(
   if (!pending) {
     // Messages racing our own in-flight kick must not whitelist the sender.
     if (state.isKicking(chatId, userId, now)) {
-      await quietly(() => api.deleteMessage(chatId, messageId));
+      await deleteMessage(deps, chatId, userId, messageId, 'newcomer message');
       return;
     }
     // They write, so they are inside; not pending, so they predate the bot.
@@ -345,31 +365,32 @@ export async function onMessage(
   if (pending.decoyAnswer !== undefined && answer === String(pending.decoyAnswer)) {
     state.clearPending(chatId, userId);
     deps.log('Decoy answered, banning temporarily', { chatId, userId });
-    await quietly(() => api.deleteMessage(chatId, messageId));
-    await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
-    await banFailedNewcomer(deps, chatId, userId).catch((error) =>
-      deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
-    );
+    await deleteMessage(deps, chatId, userId, messageId, 'newcomer message');
+    await deleteMessage(deps, chatId, userId, pending.captchaMessageId, 'captcha');
+    await banFailedNewcomer(deps, chatId, userId);
     await dropJoinMessage(deps, chatId, userId, pending);
     return;
   }
 
   if (answer === String(pending.answer)) {
     state.markPassed(chatId, userId, now);
-    await quietly(() => api.deleteMessage(chatId, messageId));
-    await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
+    await deleteMessage(deps, chatId, userId, messageId, 'newcomer message');
+    await deleteMessage(deps, chatId, userId, pending.captchaMessageId, 'captcha');
     const hello = await withRetry(() =>
       api.sendMessage(
         chatId,
         fill(deps.messages.welcome, userId, pending.firstName ?? '', deps.timeoutSec),
       ),
     );
-    setTimeout(() => void quietly(() => api.deleteMessage(chatId, hello.message_id)), WELCOME_TTL_MS);
+    setTimeout(
+      () => void deleteMessage(deps, chatId, userId, hello.message_id, 'welcome message'),
+      WELCOME_TTL_MS,
+    );
     return;
   }
 
   // Anything else from a newcomer goes to the bin, no room for spam.
-  await quietly(() => api.deleteMessage(chatId, messageId));
+  await deleteMessage(deps, chatId, userId, messageId, 'newcomer message');
 
   // The sum is 0..18: without an attempt cap the captcha is guessable for free.
   if (answer !== undefined && /^\d+$/.test(answer)) {
@@ -377,10 +398,8 @@ export async function onMessage(
     if (attempts >= deps.captchaMaxAttempts) {
       state.clearPending(chatId, userId);
       deps.log('Out of attempts, banning temporarily', { chatId, userId });
-      await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
-      await banFailedNewcomer(deps, chatId, userId).catch((error) =>
-        deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
-      );
+      await deleteMessage(deps, chatId, userId, pending.captchaMessageId, 'captcha');
+      await banFailedNewcomer(deps, chatId, userId);
       await dropJoinMessage(deps, chatId, userId, pending);
       return;
     }
@@ -425,10 +444,8 @@ export async function sweepExpired(deps: Deps): Promise<void> {
     if (!current || current.captchaMessageId !== pending.captchaMessageId) continue;
     deps.state.clearPending(chatId, userId);
     deps.log('Captcha expired, banning temporarily', { chatId, userId });
-    await banFailedNewcomer(deps, chatId, userId).catch((error) =>
-      deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
-    );
-    await quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
+    await banFailedNewcomer(deps, chatId, userId);
+    await deleteMessage(deps, chatId, userId, pending.captchaMessageId, 'captcha');
     await dropJoinMessage(deps, chatId, userId, current);
   }
 }

@@ -4,13 +4,26 @@ import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import { createSerialGate } from './gate.js';
 import { sweepExpired, type ChatApi, type Deps } from './handlers.js';
+import { errorText, type Log } from './logging.js';
 import { State } from './state.js';
 import { createSweeper, registerHandlers, SWEEP_INTERVAL_MS } from './wiring.js';
 
 const config = loadConfig();
+function logLine(message: string): string {
+  return `${new Date().toISOString()} ${message.replaceAll(config.botToken, '[redacted]')}`;
+}
+
+const log: Log = (message, context) => {
+  console.log(logLine(message), context ?? '');
+};
+
+function fatal(message: string, error: unknown): void {
+  process.stderr.write(`${logLine(`${message}: ${errorText(error)}`)}\n`, () => process.exit(1));
+}
+
 const state = new State(config.dataFile);
-state.load();
-state.startFlusher();
+state.load(log);
+state.startFlusher((error) => fatal('Periodic state snapshot failed', error));
 
 const bot = new Bot(config.botToken, {
   client: {
@@ -55,8 +68,8 @@ const deps: Deps = {
   captchaOperandDigits: config.captchaOperandDigits,
   allowedBotIds: config.allowedBotIds,
   allowedChatIds: config.allowedChatIds,
-  messages: loadMessages(config.messagesFile),
-  log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
+  messages: loadMessages(config.messagesFile, log),
+  log,
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
 
@@ -79,8 +92,11 @@ async function shutdown(): Promise<void> {
   await state.stop();
   process.exit(0);
 }
-process.on('SIGTERM', () => void shutdown());
-process.on('SIGINT', () => void shutdown());
+function requestShutdown(): void {
+  void shutdown().catch((error) => fatal('Shutdown failed', error));
+}
+process.on('SIGTERM', requestShutdown);
+process.on('SIGINT', requestShutdown);
 
 // Plain bot.start() handles updates strictly one at a time: captcha renders
 // (25-165ms of CPU each) never overlap, and a join flood queues up instead of
@@ -93,4 +109,4 @@ void bot.start({
     deps.botId = me.id;
     deps.log(`Started @${me.username}`);
   },
-});
+}).catch((error) => fatal('Telegram polling failed', error));

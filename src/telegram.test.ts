@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MAX_RETRY_WAIT_MS, quietly, withRetry } from './telegram.js';
+import { MAX_RETRY_WAIT_MS, withRetry } from './telegram.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -60,22 +60,6 @@ describe('withRetry', () => {
     const call = vi.fn().mockRejectedValue('boom');
 
     await expect(withRetry(call)).rejects.toBe('boom');
-    expect(call).toHaveBeenCalledOnce();
-  });
-});
-
-describe('quietly', () => {
-  it('swallows failures: cosmetic calls must not crash the bot', async () => {
-    const call = vi.fn().mockRejectedValue(new Error('message is already gone'));
-
-    await expect(quietly(call)).resolves.toBeUndefined();
-  });
-
-  it('still performs the call', async () => {
-    const call = vi.fn(async () => 'done');
-
-    await quietly(call);
-
     expect(call).toHaveBeenCalledOnce();
   });
 });

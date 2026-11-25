@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { HttpError } from 'grammy';
+import { FetchError } from 'node-fetch';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MESSAGES } from './config.js';
@@ -406,6 +408,33 @@ describe('races and refusals', () => {
       expect.anything(),
     );
     expect(deps.state.isPassed(CHAT, 7)).toBe(false);
+  });
+
+  it('logs newcomer and expired captcha deletion failures separately', async () => {
+    const { deps, api } = setup();
+    await onJoin(deps, CHAT, guest);
+    const transportError = new FetchError(
+      'request to https://example.com/bot123:secret',
+      'system',
+      Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
+    );
+    api.deleteMessage!
+      .mockRejectedValueOnce(new Error('message cannot be deleted'))
+      .mockRejectedValueOnce(new HttpError('deleteMessage network request failed', transportError));
+
+    await onMessage(deps, CHAT, 7, 555, 'private chat content');
+    deps.now = () => 1_000_000 + 61_000;
+    await sweepExpired(deps);
+
+    expect(deps.log).toHaveBeenCalledWith(
+      'Could not delete newcomer message: message cannot be deleted',
+      { chatId: CHAT, userId: 7, messageId: 555 },
+    );
+    expect(deps.log).toHaveBeenCalledWith(
+      'Could not delete captcha: deleteMessage network request failed (ECONNRESET)',
+      { chatId: CHAT, userId: 7, messageId: 100 },
+    );
+    expect(deps.state.getPending(CHAT, 7)).toBeUndefined();
   });
 
   it('a refused ban after the attempt limit does not whitelist the spammer', async () => {

@@ -160,7 +160,7 @@ describe('flusher lifecycle', () => {
   it('the interval writes a dirty snapshot on its own', async () => {
     const file = tempFile();
     const state = new State(file, 10);
-    state.startFlusher();
+    state.startFlusher(vi.fn());
     state.markPassed(-1, 7);
 
     await new Promise((resolve) => setTimeout(resolve, 40));
@@ -172,7 +172,7 @@ describe('flusher lifecycle', () => {
   it('stop() writes what the last interval missed and stops the timer', async () => {
     const file = tempFile();
     const state = new State(file, 60_000);
-    state.startFlusher();
+    state.startFlusher(vi.fn());
     state.markPassed(-1, 7);
 
     await state.stop();
