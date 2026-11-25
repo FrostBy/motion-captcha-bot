@@ -243,7 +243,10 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
       return;
     }
     // Keeping someone pending with no captcha is unfair, let them in loudly.
-    deps.log(`Captcha render failed, newcomer let through: ${errorText(error)}`, { chatId });
+    deps.log(`Captcha render failed, newcomer let through: ${errorText(error)}`, {
+      chatId,
+      userId: member.id,
+    });
     state.markPassed(chatId, member.id, deps.now?.() ?? Date.now());
     return;
   }

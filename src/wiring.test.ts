@@ -20,7 +20,8 @@ const CHAT = -100500;
 function fakeBot() {
   const middlewares: Array<(ctx: unknown, next: () => Promise<void>) => Promise<void>> = [];
   const events = new Map<string, (ctx: unknown) => Promise<void>>();
-  let errorHandler: ((error: { message: string }) => void) | undefined;
+  type UpdateFailure = { error: unknown; ctx: unknown };
+  let errorHandler: ((failure: UpdateFailure) => void) | undefined;
   return {
     use: (fn: (ctx: unknown, next: () => Promise<void>) => Promise<void>) => {
       middlewares.push(fn);
@@ -28,7 +29,7 @@ function fakeBot() {
     on: (event: string, fn: (ctx: unknown) => Promise<void>) => {
       events.set(event, fn);
     },
-    catch: (fn: (error: { message: string }) => void) => {
+    catch: (fn: (failure: UpdateFailure) => void) => {
       errorHandler = fn;
     },
     /** Push an update through the middleware chain and into its handler. */
@@ -41,7 +42,7 @@ function fakeBot() {
       };
       await next();
     },
-    fail: (message: string) => errorHandler?.({ message }),
+    fail: (failure: UpdateFailure) => errorHandler?.(failure),
   };
 }
 
@@ -251,12 +252,25 @@ describe('update wiring', () => {
     expect(handlers.onJoin).toHaveBeenCalled();
   });
 
-  it('a handler failure is logged instead of crashing the bot', () => {
+  it('logs the failing update identifiers without the message text', () => {
     const { bot, wiring } = setup();
 
-    bot.fail('boom');
+    bot.fail({
+      error: new Error('boom'),
+      ctx: {
+        update: { update_id: 10 },
+        chat: { id: CHAT },
+        from: { id: 7 },
+        msg: { message_id: 42, text: 'private chat content' },
+      },
+    });
 
-    expect(wiring.deps.log).toHaveBeenCalledWith(expect.stringContaining('boom'));
+    expect(wiring.deps.log).toHaveBeenCalledWith('Update handling failed: boom', {
+      updateId: 10,
+      chatId: CHAT,
+      userId: 7,
+      messageId: 42,
+    });
   });
 });
 

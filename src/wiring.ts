@@ -8,6 +8,7 @@ import {
   onSeenInside,
   type Deps,
 } from './handlers.js';
+import { errorText } from './logging.js';
 
 /**
  * Update wiring, kept apart from process startup so it can be tested without
@@ -170,7 +171,14 @@ export function registerHandlers(bot: Bot<any>, wiring: Wiring): void {
     );
   });
 
-  bot.catch((error) => deps.log(`Update handling failed: ${error.message}`));
+  bot.catch(({ ctx, error }) => {
+    deps.log(`Update handling failed: ${errorText(error)}`, {
+      updateId: ctx.update.update_id,
+      chatId: ctx.chat?.id,
+      userId: ctx.chatMember?.new_chat_member.user.id ?? ctx.from?.id,
+      messageId: ctx.msg?.message_id,
+    });
+  });
 }
 
 /** How often expired captchas are swept. */
@@ -190,7 +198,7 @@ export function createSweeper(
     sweeping = true;
     void wiring.gate
       .run(() => sweep(wiring.deps))
-      .catch((error: Error) => wiring.deps.log(`Sweep failed: ${error.message}`))
+      .catch((error) => wiring.deps.log(`Sweep failed: ${errorText(error)}`))
       .finally(() => {
         sweeping = false;
       });
