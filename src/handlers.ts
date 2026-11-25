@@ -9,6 +9,7 @@ import {
   type Style,
 } from './captcha.js';
 import { withRetry, quietly } from './telegram.js';
+import { errorText, type Log } from './logging.js';
 import type { Messages } from './config.js';
 import type { Pending, State } from './state.js';
 
@@ -59,7 +60,7 @@ export interface Deps {
   /** Own id: updates this bot itself caused are not evidence about a user. */
   botId?: number;
   messages: Messages;
-  log: (message: string, extra?: unknown) => void;
+  log: Log;
   now?: () => number;
   random?: () => number;
 }
@@ -83,10 +84,6 @@ function fill(template: string, userId: number, firstName: string, timeoutSec: n
 const WELCOME_TTL_MS = 30_000;
 /** Keep automatic-unban updates recognizable even when delivery is delayed. */
 const CHAT_MEMBER_UPDATE_GRACE_MS = 60_000;
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Whether Telegram already considers the user gone. Fail-open on purpose: an
