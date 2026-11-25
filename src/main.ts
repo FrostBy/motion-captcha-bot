@@ -4,10 +4,19 @@ import { seededRandom } from './captcha.js';
 import { loadConfig, loadMessages } from './config.js';
 import { createSerialGate } from './gate.js';
 import { sweepExpired, type ChatApi, type Deps } from './handlers.js';
+import type { Log } from './logging.js';
 import { State } from './state.js';
 import { createSweeper, registerHandlers, SWEEP_INTERVAL_MS } from './wiring.js';
 
 const config = loadConfig();
+function logLine(message: string): string {
+  return `${new Date().toISOString()} ${message.replaceAll(config.botToken, '[redacted]')}`;
+}
+
+const log: Log = (message, context) => {
+  console.log(logLine(message), context ?? '');
+};
+
 const state = new State(config.dataFile);
 state.load();
 state.startFlusher();
@@ -56,7 +65,7 @@ const deps: Deps = {
   allowedBotIds: config.allowedBotIds,
   allowedChatIds: config.allowedChatIds,
   messages: loadMessages(config.messagesFile),
-  log: (message, extra) => console.log(new Date().toISOString(), message, extra ?? ''),
+  log,
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
 
