@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import type { Motion, OperandDigits, Style } from './captcha.js';
+import { errorText } from './logging.js';
 
 /** Everything is driven by env vars: no settings DB, no admin panel. */
 export interface Config {
@@ -158,14 +159,22 @@ function parsePassedTtlDays(value: string | undefined): number {
 }
 
 /** Missing file means defaults; a broken one is a loud config error. */
-export function loadMessages(file: string): Messages {
+export function loadMessages(file: string, warn: (message: string) => void = console.warn): Messages {
   let raw: string;
   try {
     raw = readFileSync(file, 'utf8');
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      warn(`Could not read messages file ${file}, using defaults: ${errorText(error)}`);
+    }
     return DEFAULT_MESSAGES;
   }
-  const parsed = JSON.parse(raw) as Partial<Messages>;
+  let parsed: Partial<Messages>;
+  try {
+    parsed = JSON.parse(raw) as Partial<Messages>;
+  } catch {
+    throw new Error(`Could not parse messages file ${file}`);
+  }
   return {
     captcha: typeof parsed.captcha === 'string' ? parsed.captcha : DEFAULT_MESSAGES.captcha,
     welcome: typeof parsed.welcome === 'string' ? parsed.welcome : DEFAULT_MESSAGES.welcome,

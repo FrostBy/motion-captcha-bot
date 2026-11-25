@@ -68,7 +68,7 @@ const deps: Deps = {
   captchaOperandDigits: config.captchaOperandDigits,
   allowedBotIds: config.allowedBotIds,
   allowedChatIds: config.allowedChatIds,
-  messages: loadMessages(config.messagesFile),
+  messages: loadMessages(config.messagesFile, log),
   log,
   random: config.captchaTestSeed === undefined ? undefined : seededRandom(config.captchaTestSeed),
 };
