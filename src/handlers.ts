@@ -131,7 +131,9 @@ async function banFailedNewcomer(deps: Deps, chatId: number, userId: number): Pr
   await deps.state.flush().catch((error) =>
     deps.log(`State snapshot before the ban failed: ${errorText(error)}`, { chatId, userId }),
   );
-  await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate));
+  await withRetry(() => deps.api.banChatMember(chatId, userId, untilDate)).catch((error) =>
+    deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
+  );
 }
 
 /**
@@ -239,9 +241,7 @@ export async function onJoin(deps: Deps, chatId: number, member: Member): Promis
         chatId,
         userId: member.id,
       });
-      await banFailedNewcomer(deps, chatId, member.id).catch((banError) =>
-        deps.log(`Ban failed: ${errorText(banError)}`, { chatId, userId: member.id }),
-      );
+      await banFailedNewcomer(deps, chatId, member.id);
       await dropJoinMessage(deps, chatId, member.id, previous);
       return;
     }
@@ -347,9 +347,7 @@ export async function onMessage(
     deps.log('Decoy answered, banning temporarily', { chatId, userId });
     await quietly(() => api.deleteMessage(chatId, messageId));
     await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
-    await banFailedNewcomer(deps, chatId, userId).catch((error) =>
-      deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
-    );
+    await banFailedNewcomer(deps, chatId, userId);
     await dropJoinMessage(deps, chatId, userId, pending);
     return;
   }
@@ -378,9 +376,7 @@ export async function onMessage(
       state.clearPending(chatId, userId);
       deps.log('Out of attempts, banning temporarily', { chatId, userId });
       await quietly(() => api.deleteMessage(chatId, pending.captchaMessageId));
-      await banFailedNewcomer(deps, chatId, userId).catch((error) =>
-        deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
-      );
+      await banFailedNewcomer(deps, chatId, userId);
       await dropJoinMessage(deps, chatId, userId, pending);
       return;
     }
@@ -425,9 +421,7 @@ export async function sweepExpired(deps: Deps): Promise<void> {
     if (!current || current.captchaMessageId !== pending.captchaMessageId) continue;
     deps.state.clearPending(chatId, userId);
     deps.log('Captcha expired, banning temporarily', { chatId, userId });
-    await banFailedNewcomer(deps, chatId, userId).catch((error) =>
-      deps.log(`Ban failed: ${errorText(error)}`, { chatId, userId }),
-    );
+    await banFailedNewcomer(deps, chatId, userId);
     await quietly(() => deps.api.deleteMessage(chatId, pending.captchaMessageId));
     await dropJoinMessage(deps, chatId, userId, current);
   }
